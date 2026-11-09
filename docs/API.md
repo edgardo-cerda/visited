@@ -66,18 +66,18 @@ Los tokens duran 60 días (`TOKEN_TTL_DAYS`). Guárdalo de forma segura en la ap
 ```json
 {
   "type": "comuna", "code": 5201,
-  "visited": true, "wishlist": false, "liked": true,
-  "rating": 5, "review": "Los moái al amanecer…", "visitedOn": "2024-02-10",
+  "visited": true, "wishlist": false,
+  "rating": 4.5, "review": "Los moái al amanecer…", "visitedOn": "2024-02-10",
   "reviewAt": "2026-11-09T17:00:00.000Z", "createdAt": "…", "updatedAt": "…"
 }
 ```
 
 `PUT /me/logs/:type/:code` acepta cualquier subconjunto de
-`visited` (bool), `wishlist` (bool), `liked` (bool), `rating` (entero 1–5 o `null`),
+`visited` (bool), `wishlist` (bool), `rating` (0.5 a 5 en pasos de 0.5, o `null`),
 `review` (texto ≤ 5000 o `null`), `visitedOn` (`AAAA-MM-DD` o `null`). Reglas:
 
-- Poner nota, reseña, fecha o "me gusta" marca el lugar como **visitado**.
-- `visited: false` borra nota, reseña, fecha y "me gusta".
+- Poner nota, reseña o fecha marca el lugar como **visitado**.
+- `visited: false` borra nota, reseña y fecha (y los votos que tenía la reseña).
 - `wishlist` ("Quiero ir") sólo aplica a lugares no visitados (`409` si ya está visitado). Visitar un lugar lo saca de "Quiero ir".
 - Si nada queda marcado, el registro se elimina y la respuesta es `{ "log": null }`.
 - **Regiones y comunas son independientes:** marcar una comuna no marca su región.
@@ -89,20 +89,34 @@ Si se envía un token, las respuestas pueden incluir datos propios (`myLog`).
 | Método | Ruta | Descripción |
 |---|---|---|
 | `GET` | `/places/:type/:code` | Lugar + estadísticas + 10 reseñas recientes + `myLog`. |
-| `GET` | `/places/:type/:code/reviews?limit&offset` | Reseñas paginadas (`total`). |
+| `GET` | `/places/:type/:code/reviews?sort&limit&offset` | Reseñas paginadas (`total`). |
 | `GET` | `/stats/places?type=comuna` | Visitantes, notas y promedio de cada lugar con actividad. |
-| `GET` | `/reviews?type&limit&offset` | Feed global de reseñas recientes. |
+| `GET` | `/reviews?type&sort&limit&offset` | Feed global de reseñas. |
+| `PUT` | `/reviews/:id/vote` 🔒 | Votar una reseña: `{ "value": 1 }` me gusta, `-1` no me gusta, `0` quitar el voto. No se puede votar la propia (`403`). |
 | `GET` | `/users?q=cami` | Buscar usuarios (mín. 2 caracteres). |
 | `GET` | `/users/:username` | Perfil público + resumen (nivel, conteos). Nunca expone el email. |
 | `GET` | `/users/:username/progress` | Progreso completo. |
 | `GET` | `/users/:username/logs?type` | Registros públicos del usuario. |
-| `GET` | `/users/:username/reviews?limit&offset` | Reseñas del usuario. |
+| `GET` | `/users/:username/reviews?sort&limit&offset` | Reseñas del usuario (por defecto `recent`). |
 | `GET` | `/health` | `{ "ok": true }` |
 
 Estadísticas de un lugar:
-```json
-{ "visitors": 12, "wishlisted": 3, "likes": 5, "reviews": 4, "ratings": 9,
-  "averageRating": 4.33, "histogram": [0, 0, 1, 4, 4] }
+```jsonc
+{ "visitors": 12, "wishlisted": 3, "reviews": 4, "ratings": 9,
+  "averageRating": 4.33,
+  // cantidad de notas 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5
+  "histogram": [0, 0, 0, 0, 0, 1, 0, 3, 2, 3] }
+```
+
+`sort` en las listas de reseñas: `top` (por defecto: votos netos = me gusta − no me gusta, y a igualdad las más recientes) o `recent`.
+
+Reseña:
+```jsonc
+{ "id": 42, "user": { "username": "camila", "displayName": "Camila" },
+  "place": { "type": "comuna", "code": 5201, "name": "Isla de Pascua", … },
+  "rating": 4.5, "review": "…", "visitedOn": "2024-02-10", "reviewAt": "…",
+  "votes": { "up": 7, "down": 2, "score": 5 },
+  "myVote": 1 }   // 1, -1 o 0 (sin voto / sin sesión)
 ```
 
 ## Progreso y niveles
@@ -117,7 +131,7 @@ XP: comuna visitada +10, región visitada +40, reseña +5, nota +1. Hay 10 nivel
   "regions": { "visited": 9, "total": 16, "percent": 56.3 },
   "comunas": { "visited": 31, "total": 346, "percent": 9 },
   "area": { "visitedKm2": 175000, "totalKm2": 756000, "percent": 23.2 },
-  "counts": { "reviews": 2, "ratings": 2, "wishlist": 1, "liked": 1, "averageRating": 4.5 },
+  "counts": { "reviews": 2, "ratings": 2, "wishlist": 1, "averageRating": 4.5 },
   "byRegion": [{ "code": 15, "roman": "XV", "shortName": "Arica y Parinacota", "regionVisited": true, "visitedComunas": 1, "totalComunas": 4, "percent": 25 }],
   "badges": [{ "id": "rapa-nui", "name": "Rapa Nui", "description": "Visita Isla de Pascua.", "earned": true, "current": 1, "target": 1 }]
 }

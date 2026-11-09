@@ -15,6 +15,11 @@ export function loadLogs(db, userId, type) {
   return rows.map(ser.log);
 }
 
+/** Borra los votos de reseñas que ya no existen (reseña borrada o editada a vacío). */
+export function clearOrphanVotes(db, userId) {
+  db.prepare('DELETE FROM review_votes WHERE log_id IN (SELECT id FROM logs WHERE user_id = ? AND review IS NULL)').run(userId);
+}
+
 export const progressFor = (db, userId) => computeProgress(catalog, loadLogs(db, userId));
 
 function placeParams(req) {
@@ -87,7 +92,6 @@ export function meRoutes(db) {
     const input = {
       visited: v.bool(req.body, 'visited'),
       wishlist: v.bool(req.body, 'wishlist'),
-      liked: v.bool(req.body, 'liked'),
       rating: v.rating(req.body),
       review: v.str(req.body, 'review', { max: 5000 }),
       visitedOn: v.isoDate(req.body, 'visitedOn'),
@@ -97,15 +101,15 @@ export function meRoutes(db) {
     const result = tx(db, () => {
       const prev = db.prepare('SELECT * FROM logs WHERE user_id = ? AND place_type = ? AND place_code = ?').get(req.user.id, type, code);
       const cur = prev
-        ? { visited: !!prev.visited, wishlist: !!prev.wishlist, liked: !!prev.liked, rating: prev.rating, review: prev.review, visitedOn: prev.visited_on }
-        : { visited: false, wishlist: false, liked: false, rating: null, review: null, visitedOn: null };
+        ? { visited: !!prev.visited, wishlist: !!prev.wishlist, rating: prev.rating, review: prev.review, visitedOn: prev.visited_on }
+        : { visited: false, wishlist: false, rating: null, review: null, visitedOn: null };
       const next = { ...cur };
       for (const [k, val] of Object.entries(input)) if (val !== undefined) next[k] = val;
       if (next.review === '') next.review = null;
 
       if (input.visited === false) {
-        Object.assign(next, { liked: false, rating: null, review: null, visitedOn: null });
-      } else if (next.rating || next.review || next.liked || next.visitedOn) {
+        Object.assign(next, { rating: null, review: null, visitedOn: null });
+      } else if (next.rating || next.review || next.visitedOn) {
         next.visited = true;
       }
       if (next.visited && input.wishlist === true) {
@@ -120,13 +124,14 @@ export function meRoutes(db) {
       const now = new Date().toISOString();
       const reviewAt = next.review ? (prev && prev.review === next.review ? prev.review_at : now) : null;
       db.prepare(`
-        INSERT INTO logs (user_id, place_type, place_code, visited, wishlist, liked, rating, review, visited_on, review_at, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO logs (user_id, place_type, place_code, visited, wishlist, rating, review, visited_on, review_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (user_id, place_type, place_code) DO UPDATE SET
-          visited = excluded.visited, wishlist = excluded.wishlist, liked = excluded.liked,
+          visited = excluded.visited, wishlist = excluded.wishlist,
           rating = excluded.rating, review = excluded.review, visited_on = excluded.visited_on,
           review_at = excluded.review_at, updated_at = excluded.updated_at
-      `).run(req.user.id, type, code, +next.visited, +next.wishlist, +next.liked, next.rating, next.review, next.visitedOn, reviewAt, now, now);
+      `).run(req.user.id, type, code, +next.visited, +next.wishlist, next.rating, next.review, next.visitedOn, reviewAt, now, now);
+      clearOrphanVotes(db, req.user.id);
       return db.prepare('SELECT * FROM logs WHERE user_id = ? AND place_type = ? AND place_code = ?').get(req.user.id, type, code);
     });
     res.json({ log: result ? ser.log(result) : null });
@@ -156,7 +161,7 @@ export function meRoutes(db) {
         ON CONFLICT (user_id, place_type, place_code) DO UPDATE SET visited = 1, wishlist = 0, updated_at = excluded.updated_at
         WHERE visited = 0`);
       const down = db.prepare(`
-        UPDATE logs SET visited = 0, liked = 0, rating = NULL, review = NULL, visited_on = NULL, review_at = NULL, updated_at = ?
+        UPDATE logs SET visited = 0, rating = NULL, review = NULL, visited_on = NULL, review_at = NULL, updated_at = ?
         WHERE user_id = ? AND place_type = ? AND place_code = ?`);
       const purge = db.prepare('DELETE FROM logs WHERE user_id = ? AND visited = 0 AND wishlist = 0');
       for (const it of parsed) {
@@ -164,6 +169,7 @@ export function meRoutes(db) {
         else down.run(now, req.user.id, it.type, it.code);
       }
       purge.run(req.user.id);
+      clearOrphanVotes(db, req.user.id);
     });
     res.json({ logs: loadLogs(db, req.user.id) });
   });

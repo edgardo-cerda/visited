@@ -2,6 +2,7 @@
 import { html, raw, el, esc, fmtDate, timeAgo, $ } from './html.js';
 import { store, getMap, stateIn, placeUrl, saveLog, me } from './store.js';
 import { posterCanvas, avatarCanvas } from './pixelmap.js';
+import { api } from './api.js';
 
 // ---------------------------------------------------------------------------
 // Iconos pixel art (SVG con rects)
@@ -9,7 +10,8 @@ import { posterCanvas, avatarCanvas } from './pixelmap.js';
 const ICONS = {
   star: ['...#...', '..###..', '#######', '.#####.', '..###..', '.##.##.', '.#...#.'],
   eye: ['..#####..', '.#.....#.', '#...#...#', '#..###..#', '#...#...#', '.#.....#.', '..#####..'],
-  heart: ['.##...##.', '####.####', '#########', '#########', '.#######.', '..#####..', '...###...', '....#....'],
+  thumbUp: ['....#....', '...##....', '...##....', '#.######.', '#.#######', '#.#######', '#.######.', '#.#####..'],
+  thumbDown: ['#.#####..', '#.######.', '#.#######', '#.#######', '#.######.', '...##....', '...##....', '....#....'],
   clock: ['..#####..', '.#.....#.', '#...#...#', '#...#...#', '#...###.#', '#.......#', '.#.....#.', '..#####..'],
   pen: ['......##', '.....###', '....###.', '...###..', '..###...', '.###....', '##......', '#.......'],
   pin: ['.###.', '#####', '##.##', '#####', '.###.', '..#..', '..#..'],
@@ -28,30 +30,76 @@ export function icon(name, cls = '') {
 }
 
 // ---------------------------------------------------------------------------
-// Estrellas
+// Estrellas (con medias estrellas)
 // ---------------------------------------------------------------------------
-export function stars(n, cls = '') {
-  if (!n) return '';
-  return html`<span class="stars ${cls}" title="${n} de 5 estrellas" aria-label="${n} de 5 estrellas">${Array.from({ length: n }, () => icon('star'))}</span>`;
+/** "4,5" */
+export const fmtRating = (n) => String(n).replace('.', ',');
+
+/** Estrella pixel en dos mitades (clases l y r) para poder pintar media estrella. */
+function starIcon() {
+  const rows = ICONS.star;
+  let l = '', r = '';
+  rows.forEach((row, y) => [...row].forEach((ch, x) => {
+    if (ch === '#') (x <= 3 ? (l += `M${x} ${y}h1v1h-1z`) : (r += `M${x} ${y}h1v1h-1z`));
+  }));
+  return raw(`<svg class="icon icon-star" viewBox="0 0 7 7" width="14" height="14" shape-rendering="crispEdges" aria-hidden="true"><path class="l" d="${l}"/><path class="r" d="${r}"/></svg>`);
 }
 
-/** Selector de estrellas interactivo. Clic en la misma nota la borra. */
+/** Estrellas de solo lectura: 3.5 -> ★★★½ */
+export function stars(n, cls = '') {
+  if (!n) return '';
+  const full = Math.floor(n), half = n % 1 >= 0.5;
+  const label = `${fmtRating(n)} de 5 estrellas`;
+  return html`<span class="stars ${cls}" title="${label}" aria-label="${label}">${Array.from({ length: full }, () => html`<span class="st full">${starIcon()}</span>`)}${half ? html`<span class="st half">${starIcon()}</span>` : ''}</span>`;
+}
+
+/**
+ * Selector de estrellas interactivo con medias estrellas: la mitad izquierda
+ * de cada estrella vale media. Clic en la misma nota la borra. Con el teclado,
+ * las flechas suben o bajan de a media estrella.
+ */
 export function starInput(value, onChange) {
-  const node = el(html`<div class="star-input" role="radiogroup" aria-label="Tu nota">
-    ${[1, 2, 3, 4, 5].map((i) => html`<button type="button" class="star-btn" data-v="${i}" role="radio" aria-checked="${value === i}" aria-label="${i} estrella${i > 1 ? 's' : ''}">${icon('star')}</button>`)}
+  const node = el(html`<div class="star-input" role="slider" tabindex="0" aria-label="Tu nota" aria-valuemin="0" aria-valuemax="5">
+    ${[1, 2, 3, 4, 5].map((i) => html`<button type="button" class="star-btn" data-v="${i}" tabindex="-1" aria-hidden="true">${starIcon()}</button>`)}
+    <span class="star-value"></span>
   </div>`);
   let current = value || 0;
-  const paint = (n) => node.querySelectorAll('.star-btn').forEach((b) => b.classList.toggle('on', Number(b.dataset.v) <= n));
-  paint(current);
-  node.addEventListener('mouseover', (e) => { const b = e.target.closest('.star-btn'); if (b) paint(Number(b.dataset.v)); });
-  node.addEventListener('mouseleave', () => paint(current));
-  node.addEventListener('click', (e) => {
+  const label = node.querySelector('.star-value');
+  const paint = (n) => {
+    node.querySelectorAll('.star-btn').forEach((b) => {
+      const i = Number(b.dataset.v);
+      b.classList.toggle('on', i <= n);
+      b.classList.toggle('half', i - 0.5 === n);
+    });
+    label.textContent = n ? fmtRating(n) : '';
+    node.setAttribute('aria-valuenow', String(n));
+    node.setAttribute('aria-valuetext', n ? `${fmtRating(n)} de 5 estrellas` : 'Sin nota');
+  };
+  const valueAt = (e) => {
     const b = e.target.closest('.star-btn');
-    if (!b) return;
-    const v = Number(b.dataset.v);
-    current = v === current ? 0 : v;
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    return Number(b.dataset.v) - (e.clientX - r.left < r.width / 2 ? 0.5 : 0);
+  };
+  const set = (v) => {
+    current = Math.max(0, Math.min(5, v));
     paint(current);
     onChange(current || null);
+  };
+  paint(current);
+  node.addEventListener('mousemove', (e) => { const v = valueAt(e); if (v !== null) paint(v); });
+  node.addEventListener('mouseleave', () => paint(current));
+  node.addEventListener('click', (e) => {
+    const v = valueAt(e);
+    if (v === null) return;
+    set(v === current ? 0 : v);
+  });
+  node.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') set(current + 0.5);
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') set(current - 0.5);
+    else if (e.key === 'Delete' || e.key === 'Backspace') set(0);
+    else return;
+    e.preventDefault();
   });
   node.setValue = (v) => { current = v || 0; paint(current); };
   return node;
@@ -76,13 +124,11 @@ export function poster(type, code, { logs = store.logs, quick = false, caption =
       <span class="poster-badges">
         ${st === 'visited' ? html`<span class="pb pb-visited" title="Visitado">${icon('eye')}</span>` : ''}
         ${st === 'wishlist' ? html`<span class="pb pb-wish" title="Quiero ir">${icon('clock')}</span>` : ''}
-        ${log?.liked ? html`<span class="pb pb-like" title="Me gusta">${icon('heart')}</span>` : ''}
       </span>
       ${type === 'region' ? html`<span class="poster-roman">${place.roman}</span>` : ''}
     </a>
     ${quick && me() ? html`<div class="poster-quick">
       <button type="button" class="q q-visited ${st === 'visited' ? 'on' : ''}" data-act="visited" title="${st === 'visited' ? 'Quitar visita' : 'Marcar como visitado'}">${icon('eye')}</button>
-      <button type="button" class="q q-like ${log?.liked ? 'on' : ''}" data-act="liked" title="Me gusta">${icon('heart')}</button>
       <button type="button" class="q q-wish ${st === 'wishlist' ? 'on' : ''}" data-act="wishlist" title="Quiero ir" ${st === 'visited' ? 'disabled' : ''}>${icon('clock')}</button>
     </div>` : ''}
     ${caption ? html`<div class="poster-caption"><a href="${placeUrl(type, code)}">${place.name}</a>${sub ? html`<span class="poster-sub">${sub}</span>` : ''}${log?.rating ? stars(log.rating, 'small') : ''}</div>` : ''}
@@ -110,15 +156,13 @@ export async function quickToggle(type, code, act) {
       if (!(await confirmDialog(`¿Quitar ${name} de tus visitas? Se borrarán tu nota y tu reseña.`))) return;
     }
     patch = { visited: !log?.visited };
-  } else if (act === 'liked') patch = { liked: !log?.liked };
-  else patch = { wishlist: !log?.wishlist };
+  } else patch = { wishlist: !log?.wishlist };
   try {
     const { log: next, before, after } = await saveLog(type, code, patch);
     if (act === 'visited') {
       const gained = after.level.xp - before.level.xp;
       toast(next?.visited ? `${name}: visitado (+${gained} XP)` : `${name}: quitado de tus visitas`, next?.visited ? 'ok' : '');
-    } else if (act === 'wishlist') toast(next?.wishlist ? `${name} en "Quiero ir"` : `${name} fuera de "Quiero ir"`, 'info');
-    else if (next?.liked) toast(`Te gusta ${name}`, 'like');
+    } else toast(next?.wishlist ? `${name} en "Quiero ir"` : `${name} fuera de "Quiero ir"`, 'info');
     levelUpCheck(before, after);
   } catch (e) {
     toast(e.message, 'error');
@@ -196,7 +240,7 @@ export function badgesGrid(p) {
 // Reseñas
 // ---------------------------------------------------------------------------
 export function reviewCard(r, { showPlace = true, showUser = true } = {}) {
-  const node = el(html`<article class="review">
+  const node = el(html`<article class="review" data-id="${r.id}">
     ${showPlace && r.place ? html`<a class="review-poster" href="${placeUrl(r.place.type, r.place.code)}"></a>` : ''}
     <div class="review-body">
       ${showPlace && r.place ? html`<h3 class="review-place"><a href="${placeUrl(r.place.type, r.place.code)}">${r.place.name}</a>
@@ -204,10 +248,10 @@ export function reviewCard(r, { showPlace = true, showUser = true } = {}) {
       <div class="review-meta">
         ${showUser ? html`<a class="review-user" href="/u/${r.user.username}"><span class="av-slot"></span>${r.user.displayName}</a>` : ''}
         ${stars(r.rating, 'small')}
-        ${r.liked ? html`<span class="like-mark" title="Le gusta">${icon('heart')}</span>` : ''}
         <span class="muted">${r.visitedOn ? `Visitado el ${fmtDate(r.visitedOn)}` : timeAgo(r.reviewAt)}</span>
       </div>
       <div class="review-text"></div>
+      <div class="review-votes"></div>
     </div>
   </article>`);
   // Texto con saltos de línea, siempre como texto plano.
@@ -218,10 +262,42 @@ export function reviewCard(r, { showPlace = true, showUser = true } = {}) {
     text.append(p);
   }
   if (showUser) node.querySelector('.av-slot').replaceWith(avatar(r.user.username, 'xs'));
+  node.querySelector('.review-votes').replaceWith(reviewVotes(r));
   if (showPlace && r.place) {
     node.querySelector('.review-poster').append(posterCanvas(r.place.type, r.place.code, mapsFor(r.place.type, r.place.code), () => null));
   }
   return node;
+}
+
+/** Botones "me gusta / no me gusta" de una reseña, con el puntaje neto. */
+export function reviewVotes(r) {
+  const own = me()?.username === r.user.username;
+  const box = document.createElement('div');
+  box.className = 'review-votes';
+  const paint = () => {
+    const { up, down, score } = r.votes;
+    const scoreTxt = score > 0 ? `+${score}` : String(score);
+    box.innerHTML = String(html`
+      <button type="button" class="vote vote-up ${r.myVote === 1 ? 'on' : ''}" data-v="1" ${own ? 'disabled' : ''}
+        title="${own ? 'Es tu reseña' : 'Me gusta esta reseña'}" aria-pressed="${r.myVote === 1}">${icon('thumbUp')}<span>${up}</span></button>
+      <button type="button" class="vote vote-down ${r.myVote === -1 ? 'on' : ''}" data-v="-1" ${own ? 'disabled' : ''}
+        title="${own ? 'Es tu reseña' : 'No me gusta esta reseña'}" aria-pressed="${r.myVote === -1}">${icon('thumbDown')}<span>${down}</span></button>
+      <span class="vote-score ${score > 0 ? 'pos' : score < 0 ? 'neg' : ''}" title="Votos netos">${scoreTxt}</span>`);
+  };
+  paint();
+  box.addEventListener('click', async (e) => {
+    const b = e.target.closest('.vote');
+    if (!b || b.disabled) return;
+    if (!me()) return toast('Ingresa para votar reseñas.', 'info');
+    const v = Number(b.dataset.v);
+    try {
+      const { review } = await api(`/reviews/${r.id}/vote`, { method: 'PUT', body: { value: r.myVote === v ? 0 : v } });
+      r.votes = review.votes;
+      r.myVote = review.myVote;
+      paint();
+    } catch (err) { toast(err.message, 'error'); }
+  });
+  return box;
 }
 
 // ---------------------------------------------------------------------------
@@ -281,7 +357,6 @@ export function openLogEditor(type, code) {
         <label class="field inline"><span>Fecha de visita</span><input type="date" name="visitedOn" max="${todayIso}" value="${log.visitedOn || ''}"></label>
         <div class="le-row">
           <div><span class="field-label">Nota</span><span class="le-stars"></span></div>
-          <label class="like-toggle"><input type="checkbox" name="liked" ${log.liked ? 'checked' : ''}> ${icon('heart')} Me gusta</label>
         </div>
       </div>
     </div>
@@ -302,7 +377,6 @@ export function openLogEditor(type, code) {
     const patch = {
       visited: true,
       rating,
-      liked: fd.get('liked') === 'on',
       visitedOn: fd.get('visitedOn') || null,
       review: String(fd.get('review') || '').trim() || null,
       ...extra,

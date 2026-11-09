@@ -1,9 +1,9 @@
-import { html, mount, $, fmtNum, fmtDate } from '../html.js';
+import { html, mount, $, $$, fmtNum, fmtDate } from '../html.js';
 import { api } from '../api.js';
 import { store, me, getMap, getLog, stateIn, placeName, saveLog, myProgress } from '../store.js';
 import { PixelMap, posterCanvas } from '../pixelmap.js';
 import {
-  icon, stars, starInput, mapsFor, poster, reviewCard, openLogEditor, quickToggle, toast, levelUpCheck,
+  icon, stars, starInput, fmtRating, mapsFor, poster, reviewCard, openLogEditor, quickToggle, toast, levelUpCheck,
   bar, emptyState, confirmDialog,
 } from '../components.js';
 
@@ -27,7 +27,6 @@ export async function placeView(ctx, type, code) {
           ${place.areaKm2 ? html`<li><b>${fmtNum(Math.round(place.areaKm2))}</b> km²</li>` : html`<li>Territorio Chileno Antártico</li>`}
           ${type === 'region' ? html`<li><b>${place.comunaCount}</b> comunas</li>` : ''}
           <li><b>${stats.visitors}</b> ${stats.visitors === 1 ? 'viajero' : 'viajeros'}</li>
-          <li><b>${stats.likes}</b> ${icon('heart')}</li>
           <li><b>${stats.wishlisted}</b> quieren ir</li>
         </ul>
         <div class="ratings">
@@ -36,10 +35,11 @@ export async function placeView(ctx, type, code) {
             <div class="histogram">
               ${stats.histogram.map((n, i) => {
                 const max = Math.max(1, ...stats.histogram);
-                return html`<div class="hbar" title="${n} × ${i + 1} estrella${i ? 's' : ''}"><span style="height:${Math.max(2, (n / max) * 100)}%"></span></div>`;
+                const v = (i + 1) / 2;
+                return html`<div class="hbar" title="${n} × ${fmtRating(v)} estrella${v > 1 ? 's' : ''}"><span style="height:${Math.max(2, (n / max) * 100)}%"></span></div>`;
               })}
             </div>
-            <div class="avg">${stats.averageRating ? html`<b>${stats.averageRating.toFixed(1)}</b>${stars(Math.round(stats.averageRating), 'tiny')}` : html`<span class="muted">Sin notas</span>`}</div>
+            <div class="avg">${stats.averageRating ? html`<b>${fmtRating(stats.averageRating.toFixed(1))}</b>${stars(Math.round(stats.averageRating * 2) / 2, 'tiny')}` : html`<span class="muted">Sin notas</span>`}</div>
           </div>
         </div>
       </div>
@@ -65,9 +65,10 @@ export async function placeView(ctx, type, code) {
       </section>`}
 
     <section class="section">
-      <div class="section-head"><h2>Reseñas</h2><span class="muted">${stats.reviews}</span></div>
+      <div class="section-head"><h2>Reseñas <small class="muted">${stats.reviews}</small></h2>
+        <div class="seg seg-sm" id="review-sort"><button type="button" data-sort="top" class="on">Más votadas</button><button type="button" data-sort="recent">Recientes</button></div></div>
       <div id="place-reviews"></div>
-      ${stats.reviews > data.reviews.length ? html`<button class="btn" id="more-reviews">Cargar más</button>` : ''}
+      <button class="btn" id="more-reviews" ${stats.reviews > data.reviews.length ? '' : 'hidden'}>Cargar más</button>
     </section>`);
 
   // Póster grande
@@ -78,6 +79,9 @@ export async function placeView(ctx, type, code) {
   // Panel de acciones
   const actions = $('#place-actions');
   const paintActions = () => {
+    // Si el foco estaba en las estrellas, se devuelve después de redibujar (teclado).
+    const starsFocused = !!document.activeElement?.closest?.('#my-stars');
+    queueMicrotask(() => { if (starsFocused) $('#my-stars .star-input')?.focus(); });
     if (!me()) {
       mount(actions, html`<p>Ingresa para registrar tus visitas, poner notas y escribir reseñas.</p>
         <a class="btn btn-primary btn-block" href="/ingresar?next=/${type}/${code}">Ingresar</a>
@@ -88,7 +92,6 @@ export async function placeView(ctx, type, code) {
     mount(actions, html`
       <div class="action-row">
         <button type="button" class="action ${log.visited ? 'on a-visited' : ''}" data-act="visited">${icon('eye')}<span>${log.visited ? 'Visitado' : 'Visitar'}</span></button>
-        <button type="button" class="action ${log.liked ? 'on a-like' : ''}" data-act="liked">${icon('heart')}<span>Me gusta</span></button>
         <button type="button" class="action ${log.wishlist ? 'on a-wish' : ''}" data-act="wishlist" ${log.visited ? 'disabled title="Ya lo visitaste"' : ''}>${icon('clock')}<span>Quiero ir</span></button>
       </div>
       <div class="action-rating"><span class="section-label">${log.rating ? 'Tu nota' : 'Evalúa'}</span><span id="my-stars"></span></div>
@@ -100,7 +103,7 @@ export async function placeView(ctx, type, code) {
     $('#my-stars', actions).append(starInput(log.rating, async (v) => {
       try {
         const { before, after } = await saveLog(type, code, { rating: v });
-        toast(v ? `Nota guardada: ${v} ★` : 'Nota borrada', 'ok');
+        toast(v ? `Nota guardada: ${fmtRating(v)} ★` : 'Nota borrada', 'ok');
         levelUpCheck(before, after);
       } catch (e) { toast(e.message, 'error'); }
     }));
@@ -190,14 +193,25 @@ export async function placeView(ctx, type, code) {
     offset += reviews.length;
   };
   renderReviews(data.reviews);
+  const more = $('#more-reviews');
+  let sort = 'top';
+  $('#review-sort').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-sort]');
+    if (!b || b.dataset.sort === sort) return;
+    sort = b.dataset.sort;
+    $$('#review-sort button').forEach((x) => x.classList.toggle('on', x === b));
+    offset = 0;
+    refreshReviews();
+  });
   async function refreshReviews() {
-    const r = await api(`/places/${type}/${code}/reviews?limit=${Math.max(10, offset)}`);
+    const r = await api(`/places/${type}/${code}/reviews?sort=${sort}&limit=${Math.max(10, offset)}`);
     offset = 0;
     renderReviews(r.reviews);
+    more.hidden = offset >= r.total;
   }
-  $('#more-reviews')?.addEventListener('click', async (e) => {
-    const r = await api(`/places/${type}/${code}/reviews?limit=20&offset=${offset}`);
+  more.addEventListener('click', async () => {
+    const r = await api(`/places/${type}/${code}/reviews?sort=${sort}&limit=20&offset=${offset}`);
     renderReviews(r.reviews, true);
-    if (offset >= r.total) e.target.remove();
+    more.hidden = offset >= r.total;
   });
 }

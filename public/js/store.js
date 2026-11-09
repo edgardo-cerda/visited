@@ -193,14 +193,24 @@ export function stateIn(logs, type, code) {
 export const myProgress = () => computeProgress(store.catalog, [...store.logs.values()]);
 
 /** Guarda cambios de un registro y devuelve el progreso antes/después. */
-export async function saveLog(type, code, patch) {
-  const before = myProgress();
-  const { log } = await api(`/me/logs/${type}/${code}`, { method: 'PUT', body: patch });
-  if (log) store.logs.set(logKey(type, code), log);
-  else store.logs.delete(logKey(type, code));
-  const after = myProgress();
-  emit('logs', { type, code, log });
-  return { log, before, after };
+// Los cambios a un mismo lugar se envían en orden (p. ej. varios clics rápidos en las estrellas).
+const pending = new Map();
+
+export function saveLog(type, code, patch) {
+  const key = logKey(type, code);
+  const run = async () => {
+    const before = myProgress();
+    const { log } = await api(`/me/logs/${type}/${code}`, { method: 'PUT', body: patch });
+    if (log) store.logs.set(key, log);
+    else store.logs.delete(key);
+    const after = myProgress();
+    emit('logs', { type, code, log });
+    return { log, before, after };
+  };
+  const p = (pending.get(key) || Promise.resolve()).catch(() => {}).then(run);
+  pending.set(key, p);
+  p.finally(() => { if (pending.get(key) === p) pending.delete(key); }).catch(() => {});
+  return p;
 }
 
 export async function saveBatch(items) {

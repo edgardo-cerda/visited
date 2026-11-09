@@ -52,13 +52,12 @@ const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : 0);
 export function computeProgress(catalog, logs) {
   const visitedRegions = new Set();
   const visitedComunas = new Set();
-  let reviews = 0, ratings = 0, ratingSum = 0, wishlist = 0, liked = 0;
+  let reviews = 0, ratings = 0, ratingSum = 0, wishlist = 0;
   for (const l of logs) {
     if (l.visited) (l.type === 'region' ? visitedRegions : visitedComunas).add(l.code);
     if (l.review) reviews++;
     if (l.rating) { ratings++; ratingSum += l.rating; }
     if (l.wishlist) wishlist++;
-    if (l.liked) liked++;
   }
 
   const totalArea = catalog.comunas.reduce((s, c) => s + (c.areaKm2 || 0), 0);
@@ -105,7 +104,7 @@ export function computeProgress(catalog, logs) {
     regions: { visited: visitedRegions.size, total: catalog.regions.length, percent: pct(visitedRegions.size, catalog.regions.length) },
     comunas: { visited: visitedComunas.size, total: catalog.comunas.length, percent: pct(visitedComunas.size, catalog.comunas.length) },
     area: { visitedKm2: Math.round(visitedArea), totalKm2: Math.round(totalArea), percent: pct(visitedArea, totalArea) },
-    counts: { reviews, ratings, wishlist, liked, averageRating: ratings ? Math.round((ratingSum / ratings) * 100) / 100 : null },
+    counts: { reviews, ratings, wishlist, averageRating: ratings ? Math.round((ratingSum / ratings) * 100) / 100 : null },
     byRegion,
     badges,
   };

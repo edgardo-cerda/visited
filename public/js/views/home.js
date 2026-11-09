@@ -26,7 +26,7 @@ export async function homeView(ctx) {
         <div class="hero-text">
           <p class="kicker">Tu bitácora de viajes por Chile</p>
           <h1>Pinta el mapa de Chile con los lugares que has recorrido.</h1>
-          <p class="lead">Marca las <b>16 regiones</b> y <b>346 comunas</b> que has visitado, califícalas de 1 a 5 estrellas, escribe reseñas y sube de nivel hasta convertirte en una leyenda de la Ruta 5.</p>
+          <p class="lead">Marca las <b>16 regiones</b> y <b>346 comunas</b> que has visitado, califícalas con estrellas (medias incluidas), escribe reseñas y sube de nivel hasta convertirte en una leyenda de la Ruta 5.</p>
           <div class="cta-row">
             <a class="btn btn-primary btn-lg" href="/registro">Empieza gratis</a>
             <a class="btn btn-lg" href="/explorar">Explorar lugares</a>
@@ -36,7 +36,7 @@ export async function homeView(ctx) {
       </section>
       <section class="features">
         <div class="feature">${icon('eye')}<h3>Marca</h3><p>Registra regiones y comunas por separado. Tu progreso se guarda en tu cuenta.</p></div>
-        <div class="feature">${icon('star')}<h3>Califica</h3><p>Ponle de 1 a 5 estrellas y escribe una reseña de cada lugar.</p></div>
+        <div class="feature">${icon('star')}<h3>Califica</h3><p>Ponle de ½ a 5 estrellas y escribe una reseña. Vota las reseñas de otros viajeros.</p></div>
         <div class="feature">${icon('map')}<h3>Descubre</h3><p>Tu mapa pixel art está cubierto de niebla y se despeja a medida que viajas.</p></div>
         <div class="feature">${icon('trophy')}<h3>Sube de nivel</h3><p>Gana XP, desbloquea logros y completa Chile entero.</p></div>
       </section>`}
@@ -48,7 +48,7 @@ export async function homeView(ctx) {
 
     <section class="section two-col">
       <div>
-        <div class="section-head"><h2>Reseñas recientes</h2><a href="/resenas">Ver más</a></div>
+        <div class="section-head"><h2>Reseñas destacadas</h2><a href="/resenas">Ver más</a></div>
         <div id="recent-reviews"></div>
       </div>
       <aside>
@@ -89,7 +89,7 @@ export async function homeView(ctx) {
   // Datos de la comunidad
   const [stats, reviews] = await Promise.all([
     api('/stats/places?type=comuna').catch(() => ({ places: [] })),
-    api('/reviews?limit=6').catch(() => ({ reviews: [] })),
+    api('/reviews?sort=top&limit=6').catch(() => ({ reviews: [] })),
   ]);
   const popular = [...stats.places].sort((a, b) => b.visitors - a.visitors || (b.averageRating || 0) - (a.averageRating || 0)).slice(0, 8);
   const popBox = $('#popular');

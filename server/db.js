@@ -43,6 +43,39 @@ const MIGRATIONS = [
   CREATE INDEX logs_place ON logs(place_type, place_code);
   CREATE INDEX logs_review_at ON logs(review_at);
   `,
+  // v2: notas con medias estrellas (0.5–5), sin "me gusta" en lugares, votos en reseñas.
+  `
+  CREATE TABLE logs_v2 (
+    id         INTEGER PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    place_type TEXT NOT NULL CHECK (place_type IN ('region', 'comuna')),
+    place_code INTEGER NOT NULL,
+    visited    INTEGER NOT NULL DEFAULT 0 CHECK (visited IN (0, 1)),
+    wishlist   INTEGER NOT NULL DEFAULT 0 CHECK (wishlist IN (0, 1)),
+    rating     REAL CHECK (rating >= 0.5 AND rating <= 5 AND rating * 2 = CAST(rating * 2 AS INTEGER)),
+    review     TEXT,
+    visited_on TEXT,
+    review_at  TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (user_id, place_type, place_code)
+  );
+  INSERT INTO logs_v2 (id, user_id, place_type, place_code, visited, wishlist, rating, review, visited_on, review_at, created_at, updated_at)
+    SELECT id, user_id, place_type, place_code, visited, wishlist, rating, review, visited_on, review_at, created_at, updated_at FROM logs;
+  DROP TABLE logs;
+  ALTER TABLE logs_v2 RENAME TO logs;
+  CREATE INDEX logs_place ON logs(place_type, place_code);
+  CREATE INDEX logs_review_at ON logs(review_at);
+
+  CREATE TABLE review_votes (
+    log_id     INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    value      INTEGER NOT NULL CHECK (value IN (-1, 1)),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (log_id, user_id)
+  );
+  CREATE INDEX review_votes_user ON review_votes(user_id);
+  `,
 ];
 
 export function openDb(file) {

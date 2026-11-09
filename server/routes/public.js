@@ -1,12 +1,33 @@
 import { Router } from 'express';
+import { requireAuth } from '../auth.js';
 import * as catalog from '../catalog.js';
-import { badRequest, notFound } from '../lib/errors.js';
+import { ApiError, badRequest, notFound } from '../lib/errors.js';
 import * as v from '../lib/validate.js';
 import * as ser from '../serialize.js';
 import { loadLogs, progressFor } from './me.js';
 
+/** Reseñas con autor y votos. Parámetro 1: id del usuario actual (o -1) para my_vote. */
 const REVIEW_SELECT = `
-  SELECT l.*, u.username, u.display_name FROM logs l JOIN users u ON u.id = l.user_id`;
+  SELECT l.*, u.username, u.display_name,
+         COALESCE(v.up, 0) AS up, COALESCE(v.down, 0) AS down, mv.value AS my_vote
+  FROM logs l
+  JOIN users u ON u.id = l.user_id
+  LEFT JOIN (SELECT log_id, SUM(value = 1) AS up, SUM(value = -1) AS down FROM review_votes GROUP BY log_id) v ON v.log_id = l.id
+  LEFT JOIN review_votes mv ON mv.log_id = l.id AND mv.user_id = ?`;
+
+/** Orden: "top" (votos netos, luego más recientes) o "recent". */
+const ORDER = {
+  top: 'ORDER BY (COALESCE(v.up, 0) - COALESCE(v.down, 0)) DESC, l.review_at DESC, l.id DESC',
+  recent: 'ORDER BY l.review_at DESC, l.id DESC',
+};
+function sortOf(query, def = 'top') {
+  const s = query.sort || def;
+  if (!ORDER[s]) throw badRequest('"sort" debe ser "top" o "recent".');
+  return ORDER[s];
+}
+
+// Notas posibles: 0.5, 1, …, 5 (10 valores) para el histograma.
+const RATING_STEPS = Array.from({ length: 10 }, (_, i) => (i + 1) / 2);
 
 export function publicRoutes(db) {
   const r = Router();
@@ -30,19 +51,20 @@ export function publicRoutes(db) {
   function placeStats(type, code) {
     const s = db.prepare(`
       SELECT
-        SUM(visited) AS visitors, SUM(wishlist) AS wishlisted, SUM(liked) AS likes,
-        COUNT(rating) AS ratings, AVG(rating) AS avg,
-        SUM(rating = 1) AS r1, SUM(rating = 2) AS r2, SUM(rating = 3) AS r3, SUM(rating = 4) AS r4, SUM(rating = 5) AS r5,
-        COUNT(review) AS reviews
+        SUM(visited) AS visitors, SUM(wishlist) AS wishlisted,
+        COUNT(rating) AS ratings, AVG(rating) AS avg, COUNT(review) AS reviews
       FROM logs WHERE place_type = ? AND place_code = ?`).get(type, code);
+    const counts = new Map(db.prepare(`
+      SELECT rating, COUNT(*) AS n FROM logs WHERE place_type = ? AND place_code = ? AND rating IS NOT NULL GROUP BY rating`)
+      .all(type, code).map((r) => [r.rating, r.n]));
     return {
       visitors: s.visitors || 0,
       wishlisted: s.wishlisted || 0,
-      likes: s.likes || 0,
       reviews: s.reviews || 0,
       ratings: s.ratings || 0,
       averageRating: s.avg ? Math.round(s.avg * 100) / 100 : null,
-      histogram: [s.r1 || 0, s.r2 || 0, s.r3 || 0, s.r4 || 0, s.r5 || 0],
+      // Cantidad de notas 0.5, 1, 1.5, …, 5
+      histogram: RATING_STEPS.map((r) => counts.get(r) || 0),
     };
   }
 
@@ -50,7 +72,7 @@ export function publicRoutes(db) {
     const { type, code, place } = placeParams(req);
     const reviews = db.prepare(`${REVIEW_SELECT}
       WHERE l.place_type = ? AND l.place_code = ? AND l.review IS NOT NULL
-      ORDER BY l.review_at DESC LIMIT 10`).all(type, code).map(ser.review);
+      ${ORDER.top} LIMIT 10`).all(req.user?.id ?? -1, type, code).map(ser.review);
     let myLog = null;
     if (req.user) {
       const row = db.prepare('SELECT * FROM logs WHERE user_id = ? AND place_type = ? AND place_code = ?').get(req.user.id, type, code);
@@ -67,7 +89,7 @@ export function publicRoutes(db) {
     const { limit, offset } = v.pagination(req.query);
     const reviews = db.prepare(`${REVIEW_SELECT}
       WHERE l.place_type = ? AND l.place_code = ? AND l.review IS NOT NULL
-      ORDER BY l.review_at DESC LIMIT ? OFFSET ?`).all(type, code, limit, offset).map(ser.review);
+      ${sortOf(req.query)} LIMIT ? OFFSET ?`).all(req.user?.id ?? -1, type, code, limit, offset).map(ser.review);
     const { n } = db.prepare('SELECT COUNT(*) AS n FROM logs WHERE place_type = ? AND place_code = ? AND review IS NOT NULL').get(type, code);
     res.json({ reviews, total: n, limit, offset });
   });
@@ -77,28 +99,47 @@ export function publicRoutes(db) {
     const type = req.query.type || 'comuna';
     if (!catalog.PLACE_TYPES.includes(type)) throw badRequest('El tipo debe ser "region" o "comuna".');
     const rows = db.prepare(`
-      SELECT place_code AS code, SUM(visited) AS visitors, SUM(wishlist) AS wishlisted, SUM(liked) AS likes,
+      SELECT place_code AS code, SUM(visited) AS visitors, SUM(wishlist) AS wishlisted,
              COUNT(rating) AS ratings, AVG(rating) AS avg, COUNT(review) AS reviews
       FROM logs WHERE place_type = ? GROUP BY place_code`).all(type);
     res.set('Cache-Control', 'public, max-age=60');
     res.json({
       type,
       places: rows.map((x) => ({
-        code: x.code, visitors: x.visitors || 0, wishlisted: x.wishlisted || 0, likes: x.likes || 0,
+        code: x.code, visitors: x.visitors || 0, wishlisted: x.wishlisted || 0,
         ratings: x.ratings, reviews: x.reviews, averageRating: x.avg ? Math.round(x.avg * 100) / 100 : null,
       })),
     });
   });
 
-  // ---- Reseñas recientes (feed global) ----------------------------------------
+  // ---- Reseñas (feed global y votos) ------------------------------------------
   r.get('/reviews', (req, res) => {
     const { limit, offset } = v.pagination(req.query);
     const type = req.query.type;
     if (type && !catalog.PLACE_TYPES.includes(type)) throw badRequest('El tipo debe ser "region" o "comuna".');
+    const order = sortOf(req.query);
+    const me = req.user?.id ?? -1;
     const rows = type
-      ? db.prepare(`${REVIEW_SELECT} WHERE l.review IS NOT NULL AND l.place_type = ? ORDER BY l.review_at DESC LIMIT ? OFFSET ?`).all(type, limit, offset)
-      : db.prepare(`${REVIEW_SELECT} WHERE l.review IS NOT NULL ORDER BY l.review_at DESC LIMIT ? OFFSET ?`).all(limit, offset);
+      ? db.prepare(`${REVIEW_SELECT} WHERE l.review IS NOT NULL AND l.place_type = ? ${order} LIMIT ? OFFSET ?`).all(me, type, limit, offset)
+      : db.prepare(`${REVIEW_SELECT} WHERE l.review IS NOT NULL ${order} LIMIT ? OFFSET ?`).all(me, limit, offset);
     res.json({ reviews: rows.map(ser.review), limit, offset });
+  });
+
+  /** Vota una reseña: { value: 1 } me gusta, { value: -1 } no me gusta, { value: 0 } quita el voto. */
+  r.put('/reviews/:id/vote', requireAuth, (req, res) => {
+    const id = Number(req.params.id);
+    const value = req.body?.value;
+    if (![1, -1, 0].includes(value)) throw badRequest('"value" debe ser 1, -1 o 0.', { field: 'value' });
+    const log = Number.isInteger(id) ? db.prepare('SELECT id, user_id FROM logs WHERE id = ? AND review IS NOT NULL').get(id) : null;
+    if (!log) throw notFound('Reseña no encontrada.');
+    if (log.user_id === req.user.id) throw new ApiError(403, 'forbidden', 'No puedes votar tu propia reseña.');
+    if (value === 0) db.prepare('DELETE FROM review_votes WHERE log_id = ? AND user_id = ?').run(id, req.user.id);
+    else {
+      db.prepare(`INSERT INTO review_votes (log_id, user_id, value) VALUES (?, ?, ?)
+        ON CONFLICT (log_id, user_id) DO UPDATE SET value = excluded.value`).run(id, req.user.id, value);
+    }
+    const row = db.prepare(`${REVIEW_SELECT} WHERE l.id = ?`).get(req.user.id, id);
+    res.json({ review: ser.review(row) });
   });
 
   // ---- Usuarios (perfiles públicos) --------------------------------------------
@@ -137,8 +178,8 @@ export function publicRoutes(db) {
   r.get('/users/:username/reviews', (req, res) => {
     const u = findUser(req);
     const { limit, offset } = v.pagination(req.query);
-    const rows = db.prepare(`${REVIEW_SELECT} WHERE l.user_id = ? AND l.review IS NOT NULL ORDER BY l.review_at DESC LIMIT ? OFFSET ?`)
-      .all(u.id, limit, offset);
+    const rows = db.prepare(`${REVIEW_SELECT} WHERE l.user_id = ? AND l.review IS NOT NULL ${sortOf(req.query, 'recent')} LIMIT ? OFFSET ?`)
+      .all(req.user?.id ?? -1, u.id, limit, offset);
     res.json({ reviews: rows.map(ser.review), limit, offset });
   });
 

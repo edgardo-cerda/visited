@@ -47,7 +47,9 @@ export function rating(body) {
   const v = body?.rating;
   if (v === undefined) return undefined;
   if (v === null) return null;
-  if (!Number.isInteger(v) || v < 1 || v > 5) throw badRequest('La evaluación debe ser un entero entre 1 y 5.', { field: 'rating' });
+  if (typeof v !== 'number' || !Number.isInteger(v * 2) || v < 0.5 || v > 5) {
+    throw badRequest('La evaluación debe ir de 0.5 a 5, en pasos de media estrella.', { field: 'rating' });
+  }
   return v;
 }
 

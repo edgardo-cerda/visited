@@ -21,9 +21,14 @@ function catalog() {
 function load() {
   try {
     const db = JSON.parse(localStorage.getItem(KEY));
-    if (db && db.users && db.logs) return db;
+    if (db && db.users && db.logs) {
+      db.votes ||= [];
+      // Datos de la versión anterior: sin "me gusta" en lugares.
+      for (const l of db.logs) delete l.liked;
+      return db;
+    }
   } catch { /* datos corruptos: se reinicia */ }
-  return { users: [], sessions: {}, logs: [], nextId: 1 };
+  return { users: [], sessions: {}, logs: [], votes: [], nextId: 1 };
 }
 const save = (db) => localStorage.setItem(KEY, JSON.stringify(db));
 
@@ -38,6 +43,7 @@ const bad = (m, field) => new Fail(400, 'bad_request', m, field);
 const unauthorized = (m = 'Debes iniciar sesión.') => new Fail(401, 'unauthorized', m);
 const notFound = (m = 'No encontrado.') => new Fail(404, 'not_found', m);
 const conflict = (m, field) => new Fail(409, 'conflict', m, field);
+const forbidden = (m) => new Fail(403, 'forbidden', m);
 
 async function sha256(s) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
@@ -76,7 +82,7 @@ function ratingOf(body) {
   const v = body?.rating;
   if (v === undefined) return undefined;
   if (v === null) return null;
-  if (!Number.isInteger(v) || v < 1 || v > 5) throw bad('La evaluación debe ser un entero entre 1 y 5.', 'rating');
+  if (typeof v !== 'number' || !Number.isInteger(v * 2) || v < 0.5 || v > 5) throw bad('La evaluación debe ir de 0.5 a 5, en pasos de media estrella.', 'rating');
   return v;
 }
 function isoDate(body, key) {
@@ -100,7 +106,7 @@ function page(q) {
 const publicUser = (u) => ({ username: u.username, displayName: u.displayName, bio: u.bio, createdAt: u.createdAt });
 const privateUser = (u) => ({ ...publicUser(u), email: u.email });
 const pubLog = (l) => ({
-  type: l.type, code: l.code, visited: l.visited, wishlist: l.wishlist, liked: l.liked, rating: l.rating,
+  type: l.type, code: l.code, visited: l.visited, wishlist: l.wishlist, rating: l.rating,
   review: l.review, visitedOn: l.visitedOn, reviewAt: l.reviewAt, createdAt: l.createdAt, updatedAt: l.updatedAt,
 });
 
@@ -114,14 +120,30 @@ function placeSummary(cat, type, code) {
   return { type, code, name: c.name, province: c.province, region: { code: r.code, name: r.name, shortName: r.shortName, roman: r.roman } };
 }
 
-function reviewOf(db, cat, l) {
+function reviewOf(db, cat, l, me) {
   const u = db.users.find((x) => x.id === l.userId);
+  const vs = db.votes.filter((v) => v.logId === l.id);
+  const up = vs.filter((v) => v.value === 1).length, down = vs.filter((v) => v.value === -1).length;
   return {
     id: l.id, user: { username: u.username, displayName: u.displayName }, place: placeSummary(cat, l.type, l.code),
-    rating: l.rating, review: l.review, liked: l.liked, visitedOn: l.visitedOn, reviewAt: l.reviewAt || l.updatedAt,
+    rating: l.rating, review: l.review, visitedOn: l.visitedOn, reviewAt: l.reviewAt || l.updatedAt,
+    votes: { up, down, score: up - down },
+    myVote: me ? vs.find((v) => v.userId === me.id)?.value || 0 : 0,
   };
 }
-const byReviewDesc = (a, b) => (b.reviewAt || '').localeCompare(a.reviewAt || '');
+const byRecent = (a, b) => (b.reviewAt || '').localeCompare(a.reviewAt || '') || b.id - a.id;
+const byTop = (a, b) => b.votes.score - a.votes.score || byRecent(a, b);
+function sorter(q, def = 'top') {
+  const s = q.get('sort') || def;
+  if (s !== 'top' && s !== 'recent') throw bad('"sort" debe ser "top" o "recent".');
+  return s === 'top' ? byTop : byRecent;
+}
+/** Borra votos de reseñas que ya no existen. */
+function pruneVotes(db) {
+  const alive = new Set(db.logs.filter((l) => l.review).map((l) => l.id));
+  const users = new Set(db.users.map((u) => u.id));
+  db.votes = db.votes.filter((v) => alive.has(v.logId) && users.has(v.userId));
+}
 
 function placeOf(cat, type, code) {
   if (type !== 'region' && type !== 'comuna') throw bad('El tipo debe ser "region" o "comuna".');
@@ -220,6 +242,7 @@ async function handle(method, path, body, token) {
       db.users = db.users.filter((x) => x.id !== u.id);
       db.logs = db.logs.filter((l) => l.userId !== u.id);
       for (const [k, s] of Object.entries(db.sessions)) if (s.userId === u.id) delete db.sessions[k];
+      pruneVotes(db);
       save(db);
       return { status: 204 };
     }
@@ -232,13 +255,14 @@ async function handle(method, path, body, token) {
         const p = placeOf(cat, it?.type, it?.code);
         let l = db.logs.find((x) => x.userId === u.id && x.type === it.type && x.code === p.code);
         if (it.visited === true) {
-          if (!l) db.logs.push((l = { id: db.nextId++, userId: u.id, type: it.type, code: p.code, visited: true, wishlist: false, liked: false, rating: null, review: null, visitedOn: null, reviewAt: null, createdAt: now(), updatedAt: now() }));
+          if (!l) db.logs.push((l = { id: db.nextId++, userId: u.id, type: it.type, code: p.code, visited: true, wishlist: false, rating: null, review: null, visitedOn: null, reviewAt: null, createdAt: now(), updatedAt: now() }));
           else if (!l.visited) Object.assign(l, { visited: true, wishlist: false, updatedAt: now() });
         } else if (it.visited === false) {
-          if (l) Object.assign(l, { visited: false, liked: false, rating: null, review: null, visitedOn: null, reviewAt: null, updatedAt: now() });
+          if (l) Object.assign(l, { visited: false, rating: null, review: null, visitedOn: null, reviewAt: null, updatedAt: now() });
         } else throw bad('"visited" debe ser true o false.');
       }
       db.logs = db.logs.filter((l) => l.userId !== u.id || l.visited || l.wishlist);
+      pruneVotes(db);
       save(db);
       return { data: { logs: userLogs(db, u.id) } };
     }
@@ -250,27 +274,29 @@ async function handle(method, path, body, token) {
       if (method === 'GET') return { data: { log: prev ? pubLog(prev) : null } };
       if (method === 'DELETE') {
         if (prev) db.logs.splice(idx, 1);
+        pruneVotes(db);
         save(db);
         return { status: 204 };
       }
       if (method === 'PUT') {
         if (!body || typeof body !== 'object' || Array.isArray(body)) throw bad('Cuerpo JSON inválido.');
         const input = {
-          visited: bool(body, 'visited'), wishlist: bool(body, 'wishlist'), liked: bool(body, 'liked'),
+          visited: bool(body, 'visited'), wishlist: bool(body, 'wishlist'),
           rating: ratingOf(body), review: str(body, 'review', { max: 5000 }), visitedOn: isoDate(body, 'visitedOn'),
         };
         if (body.review === null) input.review = null;
         const next = prev
-          ? { visited: prev.visited, wishlist: prev.wishlist, liked: prev.liked, rating: prev.rating, review: prev.review, visitedOn: prev.visitedOn }
-          : { visited: false, wishlist: false, liked: false, rating: null, review: null, visitedOn: null };
+          ? { visited: prev.visited, wishlist: prev.wishlist, rating: prev.rating, review: prev.review, visitedOn: prev.visitedOn }
+          : { visited: false, wishlist: false, rating: null, review: null, visitedOn: null };
         for (const [k, v] of Object.entries(input)) if (v !== undefined) next[k] = v;
         if (next.review === '') next.review = null;
-        if (input.visited === false) Object.assign(next, { liked: false, rating: null, review: null, visitedOn: null });
-        else if (next.rating || next.review || next.liked || next.visitedOn) next.visited = true;
+        if (input.visited === false) Object.assign(next, { rating: null, review: null, visitedOn: null });
+        else if (next.rating || next.review || next.visitedOn) next.visited = true;
         if (next.visited && input.wishlist === true) throw conflict('Ya marcaste este lugar como visitado; no puede estar en "Quiero ir".');
         if (next.visited) next.wishlist = false;
         if (!next.visited && !next.wishlist) {
           if (prev) db.logs.splice(idx, 1);
+          pruneVotes(db);
           save(db);
           return { data: { log: null } };
         }
@@ -279,6 +305,7 @@ async function handle(method, path, body, token) {
         const log = prev || { id: db.nextId++, userId: u.id, type, code: p.code, createdAt: t };
         Object.assign(log, next, { reviewAt, updatedAt: t });
         if (!prev) db.logs.push(log);
+        pruneVotes(db);
         save(db);
         return { data: { log: pubLog(log) } };
       }
@@ -292,7 +319,8 @@ async function handle(method, path, body, token) {
     const [, type, codeStr] = parts;
     const p = placeOf(cat, type, codeStr);
     const ls = db.logs.filter((l) => l.type === type && l.code === p.code);
-    const reviews = ls.filter((l) => l.review).sort(byReviewDesc).map((l) => reviewOf(db, cat, l));
+    const all = ls.filter((l) => l.review).map((l) => reviewOf(db, cat, l, me));
+    const reviews = [...all].sort(parts.length === 4 ? sorter(q) : byTop);
     if (parts.length === 4) {
       const { limit, offset } = page(q);
       return { data: { reviews: reviews.slice(offset, offset + limit), total: reviews.length, limit, offset } };
@@ -301,11 +329,10 @@ async function handle(method, path, body, token) {
     const stats = {
       visitors: ls.filter((l) => l.visited).length,
       wishlisted: ls.filter((l) => l.wishlist).length,
-      likes: ls.filter((l) => l.liked).length,
       reviews: reviews.length,
       ratings: rated.length,
       averageRating: rated.length ? Math.round((rated.reduce((s, l) => s + l.rating, 0) / rated.length) * 100) / 100 : null,
-      histogram: [1, 2, 3, 4, 5].map((n) => rated.filter((l) => l.rating === n).length),
+      histogram: Array.from({ length: 10 }, (_, i) => rated.filter((l) => l.rating === (i + 1) / 2).length),
     };
     const mine = me ? ls.find((l) => l.userId === me.id) : null;
     const extra = type === 'comuna'
@@ -325,7 +352,7 @@ async function handle(method, path, body, token) {
       const rated = ls.filter((l) => l.rating);
       return {
         code, visitors: ls.filter((l) => l.visited).length, wishlisted: ls.filter((l) => l.wishlist).length,
-        likes: ls.filter((l) => l.liked).length, ratings: rated.length, reviews: ls.filter((l) => l.review).length,
+        ratings: rated.length, reviews: ls.filter((l) => l.review).length,
         averageRating: rated.length ? Math.round((rated.reduce((s, l) => s + l.rating, 0) / rated.length) * 100) / 100 : null,
       };
     });
@@ -334,8 +361,20 @@ async function handle(method, path, body, token) {
   if (R('GET', 'reviews')) {
     const { limit, offset } = page(q);
     const type = q.get('type');
-    const list = db.logs.filter((l) => l.review && (!type || l.type === type)).map((l) => reviewOf(db, cat, l)).sort(byReviewDesc);
+    const list = db.logs.filter((l) => l.review && (!type || l.type === type)).map((l) => reviewOf(db, cat, l, me)).sort(sorter(q));
     return { data: { reviews: list.slice(offset, offset + limit), limit, offset } };
+  }
+  if (method === 'PUT' && parts.length === 3 && parts[0] === 'reviews' && parts[2] === 'vote') {
+    const u = requireMe();
+    const value = body?.value;
+    if (![1, -1, 0].includes(value)) throw bad('"value" debe ser 1, -1 o 0.', 'value');
+    const log = db.logs.find((l) => l.id === Number(parts[1]) && l.review);
+    if (!log) throw notFound('Reseña no encontrada.');
+    if (log.userId === u.id) throw forbidden('No puedes votar tu propia reseña.');
+    db.votes = db.votes.filter((v) => !(v.logId === log.id && v.userId === u.id));
+    if (value) db.votes.push({ logId: log.id, userId: u.id, value });
+    save(db);
+    return { data: { review: reviewOf(db, cat, log, u) } };
   }
   if (R('GET', 'users')) {
     const s = lc(q.get('q') || '').trim();
@@ -352,7 +391,7 @@ async function handle(method, path, body, token) {
     if (parts[2] === 'logs') return { data: { logs: userLogs(db, u.id, q.get('type')) } };
     if (parts[2] === 'reviews') {
       const { limit, offset } = page(q);
-      const list = db.logs.filter((l) => l.userId === u.id && l.review).map((l) => reviewOf(db, cat, l)).sort(byReviewDesc);
+      const list = db.logs.filter((l) => l.userId === u.id && l.review).map((l) => reviewOf(db, cat, l, me)).sort(sorter(q, 'recent'));
       return { data: { reviews: list.slice(offset, offset + limit), limit, offset } };
     }
   }

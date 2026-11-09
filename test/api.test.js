@@ -103,7 +103,15 @@ test('reseña y nota marcan como visitado; validaciones', async () => {
   assert.ok(r.body.log.reviewAt);
 
   assert.equal((await call('PUT', '/me/logs/comuna/5201', { token, body: { rating: 6 } })).status, 400);
-  assert.equal((await call('PUT', '/me/logs/comuna/5201', { token, body: { rating: 3.5 } })).status, 400);
+  assert.equal((await call('PUT', '/me/logs/comuna/5201', { token, body: { rating: 3.25 } })).status, 400);
+  assert.equal((await call('PUT', '/me/logs/comuna/5201', { token, body: { rating: 0 } })).status, 400);
+  assert.equal((await call('PUT', '/me/logs/comuna/5201', { token, body: { rating: '4' } })).status, 400);
+  // Medias estrellas
+  r = await call('PUT', '/me/logs/comuna/5201', { token, body: { rating: 4.5 } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.log.rating, 4.5);
+  r = await call('PUT', '/me/logs/comuna/5201', { token, body: { rating: 5 } });
+  assert.equal(r.body.log.liked, undefined, 'ya no existe "me gusta" en lugares');
   assert.equal((await call('PUT', '/me/logs/comuna/5201', { token, body: { visitedOn: '2999-01-01' } })).status, 400);
   assert.equal((await call('PUT', '/me/logs/comuna/5201', { token, body: { visitedOn: '2024-02-30' } })).status, 400);
 
@@ -151,21 +159,73 @@ test('progreso, nivel y logros', async () => {
 });
 
 test('página de lugar con estadísticas y reseñas', async () => {
-  await call('PUT', '/me/logs/comuna/5201', { token: token2, body: { rating: 3, liked: true } });
+  await call('PUT', '/me/logs/comuna/5201', { token: token2, body: { rating: 3.5 } });
   let r = await call('GET', '/places/comuna/5201', { token: token2 });
   assert.equal(r.status, 200);
   assert.equal(r.body.place.name, 'Isla de Pascua');
   assert.equal(r.body.stats.visitors, 2);
-  assert.equal(r.body.stats.averageRating, 4);
-  assert.deepEqual(r.body.stats.histogram, [0, 0, 1, 0, 1]);
+  assert.equal(r.body.stats.averageRating, 4.25);
+  // histograma: 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5
+  assert.deepEqual(r.body.stats.histogram, [0, 0, 0, 0, 0, 0, 1, 0, 0, 1]);
+  assert.equal(r.body.stats.likes, undefined);
   assert.equal(r.body.reviews.length, 1);
   assert.equal(r.body.reviews[0].user.username, 'viajera');
-  assert.equal(r.body.myLog.liked, true);
+  assert.equal(r.body.myLog.rating, 3.5);
+  assert.deepEqual(r.body.reviews[0].votes, { up: 0, down: 0, score: 0 });
 
   r = await call('GET', '/reviews');
   assert.equal(r.body.reviews.length, 1);
   r = await call('GET', '/stats/places?type=comuna');
   assert.ok(r.body.places.find((p) => p.code === 5201).visitors === 2);
+});
+
+test('votos en reseñas y orden por votos netos', async () => {
+  // Tres usuarios más que reseñan y votan.
+  const users = [];
+  for (const name of ['ana', 'beto', 'caro']) {
+    const r = await call('POST', '/auth/register', { body: { username: name, email: `${name}@mail.cl`, password: 'clave-secreta' } });
+    users.push(r.body.token);
+  }
+  const [ana, beto, caro] = users;
+  await call('PUT', '/me/logs/comuna/5201', { token: ana, body: { review: 'Reseña de Ana' } });
+  await call('PUT', '/me/logs/comuna/5201', { token: beto, body: { review: 'Reseña de Beto' } });
+  let r = await call('GET', '/places/comuna/5201/reviews?sort=recent');
+  const byUser = Object.fromEntries(r.body.reviews.map((x) => [x.user.username, x.id]));
+  assert.equal(r.body.reviews[0].user.username, 'beto', 'recientes primero');
+
+  // No se puede votar sin sesión ni la propia reseña; valores válidos.
+  assert.equal((await call('PUT', `/reviews/${byUser.ana}/vote`, { body: { value: 1 } })).status, 401);
+  assert.equal((await call('PUT', `/reviews/${byUser.ana}/vote`, { token: ana, body: { value: 1 } })).status, 403);
+  assert.equal((await call('PUT', `/reviews/${byUser.ana}/vote`, { token: beto, body: { value: 2 } })).status, 400);
+  assert.equal((await call('PUT', '/reviews/999999/vote', { token: beto, body: { value: 1 } })).status, 404);
+
+  // viajera: +2 (beto, caro) ; ana: +1 -1 = 0 ; beto: -1
+  await call('PUT', `/reviews/${byUser.viajera}/vote`, { token: beto, body: { value: 1 } });
+  r = await call('PUT', `/reviews/${byUser.viajera}/vote`, { token: caro, body: { value: 1 } });
+  assert.deepEqual(r.body.review.votes, { up: 2, down: 0, score: 2 });
+  assert.equal(r.body.review.myVote, 1);
+  await call('PUT', `/reviews/${byUser.ana}/vote`, { token: beto, body: { value: 1 } });
+  await call('PUT', `/reviews/${byUser.ana}/vote`, { token: caro, body: { value: -1 } });
+  await call('PUT', `/reviews/${byUser.beto}/vote`, { token: caro, body: { value: 1 } });
+  r = await call('PUT', `/reviews/${byUser.beto}/vote`, { token: caro, body: { value: -1 } }); // cambia el voto
+  assert.deepEqual(r.body.review.votes, { up: 0, down: 1, score: -1 });
+
+  r = await call('GET', '/places/comuna/5201', { token: caro });
+  assert.deepEqual(r.body.reviews.map((x) => [x.user.username, x.votes.score]), [['viajera', 2], ['ana', 0], ['beto', -1]]);
+  assert.deepEqual(r.body.reviews.map((x) => x.myVote), [1, -1, -1]);
+  r = await call('GET', '/reviews');
+  assert.equal(r.body.reviews[0].user.username, 'viajera');
+  assert.equal((await call('GET', '/reviews?sort=raro')).status, 400);
+
+  // Quitar el voto
+  r = await call('PUT', `/reviews/${byUser.viajera}/vote`, { token: caro, body: { value: 0 } });
+  assert.equal(r.body.review.votes.score, 1);
+
+  // Borrar la reseña borra sus votos
+  await call('PUT', '/me/logs/comuna/5201', { token: beto, body: { review: null } });
+  await call('PUT', '/me/logs/comuna/5201', { token: beto, body: { review: 'De nuevo' } });
+  r = await call('GET', '/places/comuna/5201/reviews?sort=recent');
+  assert.deepEqual(r.body.reviews[0].votes, { up: 0, down: 0, score: 0 });
 });
 
 test('perfil público no expone email', async () => {
@@ -197,6 +257,7 @@ test('cambio de contraseña, logout y borrado de cuenta', async () => {
   r = await call('DELETE', '/me', { token: token2, body: { password: 'nueva-clave-1' } });
   assert.equal(r.status, 204);
   assert.equal((await call('GET', '/users/pato')).status, 404);
+  // Quedan viajera, ana y beto (pato se fue con su cuenta).
   r = await call('GET', '/places/comuna/5201');
-  assert.equal(r.body.stats.visitors, 1);
+  assert.equal(r.body.stats.visitors, 3);
 });
