@@ -20,12 +20,12 @@ export const LEVELS = [
 ];
 
 const ZONES = [
-  { id: 'norte-grande', name: 'Norte Grande', regions: [15, 1, 2] },
-  { id: 'norte-chico', name: 'Norte Chico', regions: [3, 4] },
-  { id: 'centro', name: 'Zona Central', regions: [5, 13, 6, 7] },
-  { id: 'centro-sur', name: 'Zona Centro-Sur', regions: [16, 8, 9] },
-  { id: 'sur', name: 'Zona Sur', regions: [14, 10] },
-  { id: 'austral', name: 'Zona Austral', regions: [11, 12] },
+  { id: 'norte-grande', name: 'Norte Grande', of: 'del Norte Grande', regions: [15, 1, 2] },
+  { id: 'norte-chico', name: 'Norte Chico', of: 'del Norte Chico', regions: [3, 4] },
+  { id: 'centro', name: 'Zona Central', of: 'de la Zona Central', regions: [5, 13, 6, 7] },
+  { id: 'centro-sur', name: 'Zona Centro-Sur', of: 'de la Zona Centro-Sur', regions: [16, 8, 9] },
+  { id: 'sur', name: 'Zona Sur', of: 'de la Zona Sur', regions: [14, 10] },
+  { id: 'austral', name: 'Zona Austral', of: 'de la Zona Austral', regions: [11, 12] },
 ];
 
 export function levelFor(xp) {
@@ -84,7 +84,7 @@ export function computeProgress(catalog, logs) {
   const badges = [
     badge('primer-paso', 'Primer paso', 'Marca tu primera comuna visitada.', visitedComunas.size, 1),
     ...ZONES.map((z) =>
-      badge(`zona-${z.id}`, z.name, `Visita todas las regiones de la ${z.name}.`, z.regions.filter((c) => visitedRegions.has(c)).length, z.regions.length),
+      badge(`zona-${z.id}`, z.name, `Visita todas las regiones ${z.of}.`, z.regions.filter((c) => visitedRegions.has(c)).length, z.regions.length),
     ),
     badge('las-16', 'Las 16 regiones', 'Visita todas las regiones de Chile.', visitedRegions.size, catalog.regions.length),
     badge('arica-punta-arenas', 'De Arica a Punta Arenas', 'Visita Arica y Punta Arenas.', [15101, 12101].filter(hasC).length, 2),

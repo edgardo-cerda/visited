@@ -252,7 +252,8 @@ function frame(grid) {
 }
 
 /** Busca un rectángulo vacío (con 1 celda de holgura) para pegar un recuadro. */
-function findSpot(grid, w, h, prefer) {
+function findSpot(grid, w, h, prefer, reserved = []) {
+  const overlaps = (x, y) => reserved.some((r) => x < r.x + r.w && x + w + 2 > r.x && y < r.y + r.h && y + h + 2 > r.y);
   const xs = [...Array(Math.max(0, grid.w - w + 1)).keys()];
   const ys = [...Array(Math.max(0, grid.h - h + 1)).keys()];
   if (prefer.includes('right')) xs.reverse();
@@ -261,22 +262,25 @@ function findSpot(grid, w, h, prefer) {
   const colsFirst = prefer.includes('right') || prefer.includes('left');
   for (const a of colsFirst ? xs : ys) for (const b of colsFirst ? ys : xs) {
     const [x, y] = colsFirst ? [a, b] : [b, a];
-    if (grid.isEmptyRect(x - 1, y - 1, w + 2, h + 2)) return { x, y };
+    if (grid.isEmptyRect(x - 1, y - 1, w + 2, h + 2) && !overlaps(x - 1, y - 1)) return { x, y };
   }
   return null;
 }
 
 /** Pega recuadros buscando espacio libre; si no hay, agranda la grilla. */
+const LABEL_ROWS = 4; // espacio bajo cada recuadro para su etiqueta
+
 function placeInsets(grid, insets, prefer, growSide = 'left') {
   const placed = [];
   for (const ins of insets) {
-    let spot = findSpot(grid, ins.grid.w, ins.grid.h, ins.prefer || prefer);
+    const h = ins.grid.h + LABEL_ROWS;
+    let spot = findSpot(grid, ins.grid.w, h, ins.prefer || prefer, placed.map((p) => ({ x: p.x, y: p.y, w: p.w, h: p.h + LABEL_ROWS })));
     if (!spot) {
-      const extra = growSide === 'left' || growSide === 'right' ? ins.grid.w + 2 : ins.grid.h + 2;
+      const extra = growSide === 'left' || growSide === 'right' ? ins.grid.w + 2 : h + 2;
       const pad = { left: 0, top: 0, right: 0, bottom: 0, [growSide]: extra };
       grid = grid.padded(pad.left, pad.top, pad.right, pad.bottom);
       for (const p of placed) { p.x += pad.left; p.y += pad.top; }
-      spot = findSpot(grid, ins.grid.w, ins.grid.h, ins.prefer || prefer);
+      spot = findSpot(grid, ins.grid.w, h, ins.prefer || prefer, placed.map((p) => ({ x: p.x, y: p.y, w: p.w, h: p.h + LABEL_ROWS })));
       if (!spot) throw new Error(`No hay espacio para el recuadro ${ins.id}`);
     }
     grid.blit(ins.grid, spot.x, spot.y);
