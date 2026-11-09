@@ -51,7 +51,7 @@ export async function placeView(ctx, type, code) {
         <div class="section-head"><h2>Comunas de ${place.shortName}</h2><span id="region-progress" class="muted"></span></div>
         <div class="map-toolbar">
           ${me() ? html`<label class="switch"><input type="checkbox" id="mark-mode"><span></span> Marcar con clic</label>` : ''}
-          <span class="legend"><i class="lg-visited"></i>Visitada <i class="lg-wish"></i>Quiero ir <i class="lg-none"></i>Sin visitar</span>
+          <span class="legend"><i class="lg-visited"></i>Visitada <i class="lg-wish"></i>Quiero ir <i class="lg-none"></i>Sin explorar (niebla)</span>
         </div>
         <div class="region-maps">
           <div class="map-frame" id="region-map"></div>

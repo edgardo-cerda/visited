@@ -72,7 +72,7 @@ export async function profileView(ctx, username, tab = '') {
             ${own ? html`<label class="switch"><input type="checkbox" id="mark-mode"><span></span> Marcar con clic</label>` : ''}
           </div>
           <div class="map-frame" id="profile-map"></div>
-          <p class="legend"><i class="lg-visited"></i>Visitado <i class="lg-wish"></i>Quiero ir <i class="lg-none"></i>Sin visitar</p>
+          <p class="legend"><i class="lg-visited"></i>Visitado <i class="lg-wish"></i>Quiero ir <i class="lg-none"></i>Sin explorar (niebla)</p>
         </div>
         <aside class="side-col">
           <div id="level"></div>

@@ -23,6 +23,8 @@ const OUT = path.join(ROOT, 'public', 'data');
 const COMUNAS_COMMIT = '92332f85d52030e9f549784b7d9c6fdb87b2dd2c';
 const COMUNAS_URL = (n) =>
   `https://raw.githubusercontent.com/caracena/chile-geojson/${COMUNAS_COMMIT}/${n}.geojson`;
+const NE_COUNTRIES_URL =
+  'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_50m_admin_0_countries.geojson';
 const NE_LAND_URL =
   'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_50m_land.geojson';
 
@@ -70,7 +72,7 @@ const ANTARTICA = 12202;
 // Valores especiales de la grilla
 const V_EMPTY = 0; // fondo
 const V_FRAME = 1; // marco de recuadros
-const V_OTHER = 2; // tierra fuera de Chile (sólo en recuadro antártico)
+const V_OTHER = 2; // tierra fuera de Chile (países vecinos, Antártica fuera del sector chileno)
 const V_FIRST = 3; // v >= 3 -> codes[v - 3]
 
 // ---------------------------------------------------------------------------
@@ -146,9 +148,13 @@ class Grid {
       if (v !== V_EMPTY) this.set(ox + x, oy + y, v);
     }
   }
+  /** Rectángulo libre para un recuadro: mar o países vecinos (el recuadro "flota" encima). */
   isEmptyRect(x, y, w, h) {
     if (x < 0 || y < 0 || x + w > this.w || y + h > this.h) return false;
-    for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) if (this.data[j * this.w + i] !== V_EMPTY) return false;
+    for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) {
+      const v = this.data[j * this.w + i];
+      if (v !== V_EMPTY && v !== V_OTHER) return false;
+    }
     return true;
   }
   padded(left, top, right, bottom) {
@@ -244,6 +250,76 @@ function rasterize({ items, project, cell, bounds, margin = 1, valueAt }) {
   return grid;
 }
 
+/**
+ * Rellena huecos de 1-2 celdas entre Chile y un país vecino (los límites de
+ * Natural Earth y de la BCN no calzan perfecto) para que no parezcan mar.
+ */
+function fillBorderGaps(grid, reach = 2) {
+  const { w, h, data } = grid;
+  const kind = (x, y) => {
+    if (x < 0 || y < 0 || x >= w || y >= h) return 0;
+    const v = data[y * w + x];
+    return v >= V_FIRST ? 1 : v === V_OTHER ? 2 : 0;
+  };
+  const fills = [];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (data[y * w + x] !== V_EMPTY) continue;
+    for (const [dx, dy] of [[1, 0], [0, 1]]) {
+      let a = 0, b = 0;
+      for (let k = 1; k <= reach && !a; k++) a = kind(x - dx * k, y - dy * k);
+      for (let k = 1; k <= reach && !b; k++) b = kind(x + dx * k, y + dy * k);
+      if ((a === 1 && b === 2) || (a === 2 && b === 1) || (a === 2 && b === 2)) { fills.push(y * w + x); break; }
+    }
+  }
+  for (const j of fills) data[j] = V_OTHER;
+  return grid;
+}
+
+// Ruido determinista (para bordes de nubes irregulares).
+function hash2(x, y) {
+  let h = Math.imul(x, 374761393) + Math.imul(y, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function noise2(x, y, s) {
+  const gx = Math.floor(x / s), gy = Math.floor(y / s);
+  const fx = x / s - gx, fy = y / s - gy;
+  const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+  const a = hash2(gx, gy), b = hash2(gx + 1, gy), c = hash2(gx, gy + 1), d = hash2(gx + 1, gy + 1);
+  return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+}
+
+/**
+ * Deja los países vecinos sólo como una franja de ancho irregular junto a
+ * Chile (cordillera + nubes), en vez de rectángulos cortados por el borde.
+ */
+function trimNeighbours(grid, min = 5, extra = 6) {
+  const { w, h, data } = grid;
+  const dist = new Uint8Array(w * h).fill(255);
+  let frontier = [];
+  for (let j = 0; j < w * h; j++) if (data[j] >= V_FIRST) { dist[j] = 0; frontier.push(j); }
+  const max = min + extra;
+  for (let d = 1; d <= max && frontier.length; d++) {
+    const next = [];
+    for (const j of frontier) {
+      const x = j % w;
+      for (const n of [x > 0 ? j - 1 : -1, x < w - 1 ? j + 1 : -1, j - w, j + w]) {
+        if (n < 0 || n >= w * h || dist[n] !== 255 || data[n] !== V_OTHER) continue;
+        dist[n] = d;
+        next.push(n);
+      }
+    }
+    frontier = next;
+  }
+  for (let j = 0; j < w * h; j++) {
+    if (data[j] !== V_OTHER) continue;
+    const x = j % w, y = Math.floor(j / w);
+    const limit = min + extra * (0.6 * noise2(x, y, 9) + 0.4 * noise2(x + 50, y, 3));
+    if (dist[j] > limit) data[j] = V_EMPTY;
+  }
+  return grid;
+}
+
 function frame(grid) {
   const g = grid.padded(1, 1, 1, 1);
   for (let x = 0; x < g.w; x++) { g.set(x, 0, V_FRAME); g.set(x, g.h - 1, V_FRAME); }
@@ -322,6 +398,11 @@ async function main() {
     features.push(...fc.features);
   }
   const land = await cached(NE_LAND_URL, 'ne_50m_land.geojson');
+  const countries = await cached(NE_COUNTRIES_URL, 'ne_50m_admin_0_countries.geojson');
+  // Países vecinos: se dibujan primero (las comunas chilenas quedan encima).
+  const neighbours = countries.features
+    .filter((f) => ['Argentina', 'Bolivia', 'Peru'].includes(f.properties.ADMIN))
+    .map((f) => ({ value: V_OTHER, parts: parts(f.geometry), fit: false }));
 
   // --- Catálogo -----------------------------------------------------------
   const regionByCode = new Map(REGIONS.map((r) => [r.code, r]));
@@ -429,7 +510,17 @@ async function main() {
       { label: 'NORTE', regions: [15, 1, 2, 3, 4] },
       { label: 'CENTRO', regions: [5, 13, 6, 7, 16, 8, 9, 14, 10] },
       { label: 'SUR', regions: [11, 12] },
-    ].map((s) => ({ ...s, grid: rasterize({ items: mainlandItems((c) => s.regions.includes(c.region)), project: proj, cell, margin: 1 }) }));
+    ].map((s) => {
+      const own = mainlandItems((c) => s.regions.includes(c.region));
+      // Bbox proyectado del tramo, con espacio al este para los Andes y las nubes.
+      const b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+      for (const it of own) for (const p of it.parts) for (const ring of p) for (const [lon, lat] of ring) {
+        const [X, Y] = proj(lon, lat);
+        b.x0 = Math.min(b.x0, X); b.x1 = Math.max(b.x1, X); b.y0 = Math.min(b.y0, Y); b.y1 = Math.max(b.y1, Y);
+      }
+      const bounds = { x0: b.x0 - 2 * cell, x1: b.x1 + 9 * cell, y0: b.y0 - cell, y1: b.y1 + cell };
+      return { ...s, grid: trimNeighbours(fillBorderGaps(rasterize({ items: [...neighbours, ...own], project: proj, cell, bounds, margin: 0 }))) };
+    });
     const gap = 3, top = 7;
     const W = strips.reduce((s, x) => s + x.grid.w, 0) + gap * (strips.length - 1);
     const H = Math.max(...strips.map((s) => s.grid.h)) + top;
@@ -466,7 +557,7 @@ async function main() {
     }));
     const [px0, py1] = proj(window.x0, window.y0);
     const [px1, py0] = proj(window.x1, window.y1);
-    let grid = rasterize({ items, project: proj, cell, bounds: { x0: px0, x1: px1, y0: py0, y1: py1 }, margin: 0 });
+    let grid = fillBorderGaps(rasterize({ items: [...neighbours, ...items], project: proj, cell, bounds: { x0: px0, x1: px1, y0: py0, y1: py1 }, margin: 0 }));
     let placed = [];
     if (r.code === 5) ({ grid, placed } = placeInsets(grid, [insets.rapanui(), insets.jf()], ['bottom'], 'left'));
     if (r.code === 12) ({ grid, placed } = placeInsets(grid, [insets.antartica()], ['right'], 'right'));

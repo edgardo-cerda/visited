@@ -37,7 +37,7 @@ export async function homeView(ctx) {
       <section class="features">
         <div class="feature">${icon('eye')}<h3>Marca</h3><p>Registra regiones y comunas por separado. Tu progreso se guarda en tu cuenta.</p></div>
         <div class="feature">${icon('star')}<h3>Califica</h3><p>Ponle de 1 a 5 estrellas y escribe una reseña de cada lugar.</p></div>
-        <div class="feature">${icon('map')}<h3>Colorea</h3><p>Tu mapa pixel art se pinta a medida que viajas.</p></div>
+        <div class="feature">${icon('map')}<h3>Descubre</h3><p>Tu mapa pixel art está cubierto de niebla y se despeja a medida que viajas.</p></div>
         <div class="feature">${icon('trophy')}<h3>Sube de nivel</h3><p>Gana XP, desbloquea logros y completa Chile entero.</p></div>
       </section>`}
 
