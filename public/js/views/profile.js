@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { store, me, getMap, stateIn, logsToMap, placeName } from '../store.js';
 import { computeProgress } from '../shared/progress.js';
 import { PixelMap } from '../pixelmap.js';
+import { url } from '../config.js';
 import {
   avatar, levelCard, regionProgressList, badgesGrid, poster, reviewCard, emptyState, quickToggle, toast, icon,
 } from '../components.js';
@@ -104,7 +105,7 @@ export async function profileView(ctx, username, tab = '') {
     body.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => {
       body.querySelectorAll('[data-mode]').forEach((x) => x.classList.toggle('on', x === b));
       pm.setMode(b.dataset.mode);
-      history.replaceState(null, '', b.dataset.mode === 'region' ? `${base}?modo=regiones` : base);
+      history.replaceState(null, '', url(b.dataset.mode === 'region' ? `${base}?modo=regiones` : base));
     }));
     $('#mark-mode')?.addEventListener('change', (e) => {
       markMode = e.target.checked;

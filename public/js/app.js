@@ -1,4 +1,5 @@
-import { html, mount, $, esc } from './html.js';
+import { html, mount, $, esc, el } from './html.js';
+import { BASE, DEMO, url, appPath, stripBase } from './config.js';
 import { store, on, me, loadCatalog, loadMaps, refreshMe, searchPlaces, placeUrl } from './store.js';
 import { avatar, loading, toast } from './components.js';
 import { homeView } from './views/home.js';
@@ -24,15 +25,15 @@ const app = $('#app');
 let cleanup = [];
 
 export function navigate(path, { replace = false } = {}) {
-  if (replace) history.replaceState(null, '', path);
-  else history.pushState(null, '', path);
+  if (replace) history.replaceState(null, '', url(path));
+  else history.pushState(null, '', url(path));
   render();
 }
 
 async function render() {
   for (const fn of cleanup) fn();
   cleanup = [];
-  const path = location.pathname.replace(/\/+$/, '') || '/';
+  const path = appPath();
   const ctx = {
     root: app,
     query: new URLSearchParams(location.search),
@@ -61,7 +62,7 @@ async function render() {
 
 function renderNav() {
   const u = me();
-  const path = location.pathname;
+  const path = appPath();
   const link = (href, label) => html`<a href="${href}" class="${path === href || (href !== '/' && path.startsWith(href)) ? 'active' : ''}">${label}</a>`;
   mount($('#mainnav'), html`
     ${link('/explorar', 'Explorar')}
@@ -78,10 +79,11 @@ function renderNav() {
 document.addEventListener('click', (e) => {
   const a = e.target.closest('a[href]');
   if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-  const href = a.getAttribute('href');
-  if (!href.startsWith('/') || href.startsWith('//') || a.target || a.hasAttribute('download')) return;
+  const raw = a.getAttribute('href');
+  if (!raw.startsWith('/') || raw.startsWith('//') || a.target || a.hasAttribute('download')) return;
   e.preventDefault();
-  if (href !== location.pathname + location.search) navigate(href);
+  const href = stripBase(raw);
+  if (href !== appPath() + location.search) navigate(href);
 });
 window.addEventListener('popstate', render);
 
@@ -117,6 +119,26 @@ function setupSearch() {
 }
 
 // ---------------------------------------------------------------------------
+// Si la web vive bajo un prefijo (GitHub Pages: /visited), corrige los enlaces internos.
+function fixLinks(root) {
+  if (!BASE || !root.querySelectorAll) return;
+  const all = root.matches?.('a[href^="/"]') ? [root, ...root.querySelectorAll('a[href^="/"]')] : root.querySelectorAll('a[href^="/"]');
+  for (const a of all) {
+    const h = a.getAttribute('href');
+    if (!h.startsWith('//') && stripBase(h) === h) a.setAttribute('href', BASE + h);
+  }
+}
+if (BASE) {
+  fixLinks(document);
+  new MutationObserver((muts) => {
+    for (const m of muts) for (const n of m.addedNodes) if (n.nodeType === 1) fixLinks(n);
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
+if (DEMO) {
+  document.body.prepend(el(html`<div class="demo-banner">VERSIÓN DE PRUEBA · Las cuentas, visitas y reseñas se guardan solo en este navegador.</div>`));
+}
+
 async function start() {
   mount(app, loading());
   await Promise.all([loadCatalog(), loadMaps()]);

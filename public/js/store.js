@@ -2,6 +2,7 @@
 import { api, getSession, setSession, handleUnauthorized } from './api.js';
 import { computeProgress } from './shared/progress.js';
 import { norm } from './html.js';
+import { url } from './config.js';
 
 const listeners = new Map();
 export function on(evt, fn) {
@@ -23,7 +24,7 @@ export const store = {
 // Catálogo
 // ---------------------------------------------------------------------------
 export async function loadCatalog() {
-  const raw = await (await fetch('/data/catalog.json')).json();
+  const raw = await (await fetch(url('/data/catalog.json'))).json();
   const regionByCode = new Map(raw.regions.map((r) => [r.code, r]));
   const comunaByCode = new Map(raw.comunas.map((c) => [c.code, c]));
   const comunasByRegion = new Map(raw.regions.map((r) => [r.code, raw.comunas.filter((c) => c.region === r.code)]));
@@ -59,7 +60,7 @@ let mapsRaw = null;
 const decoded = new Map();
 
 export async function loadMaps() {
-  mapsRaw = await (await fetch('/data/maps.json')).json();
+  mapsRaw = await (await fetch(url('/data/maps.json'))).json();
 }
 
 export function getMap(id) {

@@ -1,5 +1,8 @@
 /** Cliente mínimo de la API REST (la misma que puede usar una app móvil). */
-const BASE = '/api/v1';
+import { DEMO, url } from './config.js';
+import { demoRequest } from './demo-api.js';
+
+const BASE = url('/api/v1');
 const KEY = 'visited.session';
 
 export class ApiError extends Error {
@@ -27,15 +30,21 @@ export async function api(path, { method = 'GET', body } = {}) {
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (session?.token) headers.Authorization = `Bearer ${session.token}`;
-  let res;
-  try {
-    res = await fetch(BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-  } catch {
-    throw new ApiError(0, { error: { message: 'No hay conexión con el servidor.' } });
+  let res, data = null;
+  if (DEMO) {
+    // Versión de prueba: la "API" corre en el navegador (ver demo-api.js).
+    const r = await demoRequest(method, path, body, session?.token);
+    res = { status: r.status, ok: r.status < 400 };
+    data = r.data;
+  } else {
+    try {
+      res = await fetch(BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    } catch {
+      throw new ApiError(0, { error: { message: 'No hay conexión con el servidor.' } });
+    }
+    const text = await res.text();
+    try { data = text ? JSON.parse(text) : null; } catch { /* respuesta no JSON */ }
   }
-  const text = await res.text();
-  let data = null;
-  try { data = text ? JSON.parse(text) : null; } catch { /* respuesta no JSON */ }
   if (!res.ok) {
     if (res.status === 401 && session?.token && !path.startsWith('/auth/')) onUnauthorized();
     throw new ApiError(res.status, data);

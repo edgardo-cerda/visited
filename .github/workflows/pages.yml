@@ -1,0 +1,39 @@
+# Publica la versión de prueba (sin servidor) en GitHub Pages.
+# Requiere activar Pages una vez: Settings → Pages → Source: "GitHub Actions".
+name: Publicar versión de prueba
+
+on:
+  push:
+    branches: [main, master, claude/exciting-lamport-1vnzyh]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generar sitio estático
+        run: node scripts/build-pages.mjs
+        env:
+          PAGES_BASE: /${{ github.event.repository.name }}
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4

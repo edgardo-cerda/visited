@@ -1,6 +1,7 @@
 import { html, mount, $, norm } from '../html.js';
 import { store, me, stateIn, myProgress } from '../store.js';
 import { poster, bar } from '../components.js';
+import { url } from '../config.js';
 
 export async function exploreView(ctx) {
   document.title = 'Explorar · Visited Chile';
@@ -82,7 +83,7 @@ export async function exploreView(ctx) {
   const sync = () => {
     const qs = new URLSearchParams({ tab: 'comunas' });
     for (const k of ['q', 'region', 'status']) if (state[k]) qs.set(k, state[k]);
-    history.replaceState(null, '', `/explorar?${qs}`);
+    history.replaceState(null, '', url(`/explorar?${qs}`));
     paint();
   };
   $('#f-q').addEventListener('input', (e) => { state.q = e.target.value; sync(); });

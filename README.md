@@ -39,6 +39,18 @@ npm test
 | `TRUST_PROXY` | — | Ponlo en `1` si corre detrás de un proxy (Nginx, Render, Fly…). |
 | `AUTH_RATE_LIMIT` | `30` | Intentos de login/registro por IP cada 15 min. |
 
+## Versión de prueba en GitHub Pages
+
+GitHub Pages sólo sirve archivos estáticos, así que ahí se publica una **versión de prueba** sin servidor: la API corre dentro del navegador (`public/js/demo-api.js`, con las mismas reglas que la real) y las cuentas, visitas y reseñas se guardan en el `localStorage` de cada visitante. No se comparten entre personas ni dispositivos.
+
+Para activarla (una sola vez): en GitHub, **Settings → Pages → Build and deployment → Source: GitHub Actions**. Luego el workflow `.github/workflows/pages.yml` la publica en cada push a la rama principal, en `https://<usuario>.github.io/<repo>/`.
+
+Para generarla localmente:
+
+```bash
+PAGES_BASE=/visited node scripts/build-pages.mjs
+```
+
 ## Integración con una app
 
 Todo pasa por una **API REST JSON** versionada (`/api/v1`) con tokens Bearer, sin cookies y con CORS, de modo que una app móvil puede usarla directamente. Documentación completa en **[docs/API.md](docs/API.md)**.
