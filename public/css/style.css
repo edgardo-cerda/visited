@@ -186,8 +186,8 @@ textarea { resize: vertical; width: 100%; line-height: 1.4; }
 .map-toolbar .legend { margin: 0; }
 .legend i { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--brown); margin-right: -10px; vertical-align: -2px; image-rendering: pixelated; }
 .lg-visited { background: linear-gradient(90deg, #f2cc70 50%, #5bbb73 50%); }
-.lg-wish { background: repeating-conic-gradient(#8ece6c 0 25%, #d4d6dc 0 50%) 0 0 / 4px 4px; }
-.lg-none { background: #dcd8e4; }
+.lg-wish { background: repeating-conic-gradient(#8ece6c 0 25%, #c4c4c7 0 50%) 0 0 / 4px 4px; }
+.lg-none { background: #c4c4c7; }
 .region-maps { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; margin-bottom: 28px; }
 .region-maps .section-label { margin: 0; padding: 6px 10px; background: var(--card); border-bottom: 3px solid var(--brown); }
 
@@ -250,7 +250,14 @@ textarea { resize: vertical; width: 100%; line-height: 1.4; }
 
 /* ---- Página de lugar ------------------------------------------------------- */
 .place { display: grid; grid-template-columns: 230px minmax(0, 1fr) 280px; gap: 32px; padding-top: 32px; align-items: start; }
+.place-side { display: flex; flex-direction: column; gap: 14px; }
 .place-poster { aspect-ratio: 2 / 3; border: 4px solid var(--brown); box-shadow: 6px 6px 0 var(--brown); background: var(--ocean); }
+.landmarks .section-label { margin: 0 0 6px; }
+.landmarks-hint { color: var(--muted); font-size: 15px; margin: 0; }
+.landmarks-hint .icon { color: var(--brown-2); width: 16px; height: auto; }
+.landmark-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.landmark-list li { display: inline-flex; align-items: center; gap: 6px; background: var(--card); border: 2px solid var(--brown); padding: 2px 8px 2px 4px; font-size: 15px; }
+.sprite-canvas { width: 27px; height: 27px; }
 .place-main h1 { font-size: 40px; overflow-wrap: anywhere; }
 .place-sub { font-size: 19px; }
 .facts { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; margin: 14px 0 22px; color: var(--muted); }
@@ -440,7 +447,7 @@ textarea { resize: vertical; width: 100%; line-height: 1.4; }
   .search input { width: 150px; }
   .nav-username { display: none; }
   .place { grid-template-columns: 1fr; }
-  .place-poster { width: 160px; }
+  .place-side { width: 200px; }
   .features { grid-template-columns: 1fr; }
   .poster-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
   .poster-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }

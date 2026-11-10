@@ -8,6 +8,7 @@
  * marcarlos como visitados.
  */
 import { mapIndex } from './store.js';
+import { landmarksFor, drawSprite } from './landmarks.js';
 
 // ---------------------------------------------------------------------------
 // Colores
@@ -34,7 +35,7 @@ export const COLORS = {
   snowShade: C('#cdd2ea'),
   rock: C('#7b5b4b'),
   frame: C('#5a4030'),
-  fog: C('#d9d6e6'),
+  fog: C('#c9c9cc'),
   hover: C('#fff3a6'),
   hoverEdge: C('#f0a030'),
   focus: C('#ff7b6b'),
@@ -55,11 +56,20 @@ const tones = (base) => ({
   dark: mix(base, BLACK, 0.22),
   border: mix(base, BLACK, 0.38),
 });
+// Sin visitar: el terreno en escala de grises, bajo una niebla gris.
+const gray = (c) => { const l = Math.round(0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]); return [l, l, l]; };
 const fogged = (t) => ({
-  light: mix(t.light, COLORS.fog, 0.78),
-  base: mix(t.base, COLORS.fog, 0.74),
-  dark: mix(t.dark, COLORS.fog, 0.62),
-  border: mix(t.border, COLORS.fog, 0.5),
+  light: mix(gray(t.light), COLORS.fog, 0.55),
+  base: mix(gray(t.base), COLORS.fog, 0.6),
+  dark: mix(gray(t.dark), COLORS.fog, 0.45),
+  border: mix(gray(t.border), COLORS.fog, 0.3),
+});
+// Visitado pero fuera de la región enfocada: colores apagados.
+const muted = (t) => ({
+  light: mix(t.light, COLORS.fog, 0.55),
+  base: mix(t.base, COLORS.fog, 0.55),
+  dark: mix(t.dark, COLORS.fog, 0.45),
+  border: mix(t.border, COLORS.fog, 0.35),
 });
 const toneCache = new Map();
 const OUT_OF_FOCUS = { light: COLORS.cloud, base: COLORS.cloud, dark: COLORS.cloudShade, border: COLORS.cloudEdge };
@@ -69,7 +79,7 @@ export function terrain(comuna, region) {
   let t = toneCache.get(key);
   if (!t) {
     const full = tones(C(COMUNA_BIOME[comuna] || BIOME[region] || '#8fce6c'));
-    t = { full, fog: fogged(full), dimVisited: fogged(fogged(full)) };
+    t = { full, fog: fogged(full), dimVisited: muted(full) };
     toneCache.set(key, t);
   }
   return t;
@@ -117,8 +127,15 @@ function distanceField(w, h, from, through, max) {
   return dist;
 }
 
-// Sprite de cumbre nevada (5×4): S nieve, s sombra, R roca
-const PEAK = ['..S..', '.SSs.', 'SSsss', 'RRRRR'];
+// Sprite de cumbre nevada (9×6): S nieve, s sombra, R roca, r roca oscura
+const PEAK = [
+  '....S....',
+  '...SSs...',
+  '..SSSss..',
+  '.RSSRsrR.',
+  'RRRRRrrrr',
+  'RRRRrrrrr',
+];
 
 /**
  * Capa estática (mar, nubes, cordillera, marcos): se calcula una vez por mapa.
@@ -133,8 +150,8 @@ function staticLayer(map) {
   const isChile = (j) => comuna[j] !== 0;
   const isEmpty = (j) => data[j] === special.empty;
   const isOther = (j) => data[j] === special.other;
-  const seaDist = distanceField(w, h, (j) => isChile(j) || isOther(j), isEmpty, 6);
-  const slopeDist = distanceField(w, h, isChile, (j) => isOther(j) && !insetMask[j], 4);
+  const seaDist = distanceField(w, h, (j) => isChile(j) || isOther(j), isEmpty, 9);
+  const slopeDist = distanceField(w, h, isChile, (j) => isOther(j) && !insetMask[j], 7);
   const px = new Uint8ClampedArray(w * h * 4);
   const put = (j, c) => { px[j * 4] = c[0]; px[j * 4 + 1] = c[1]; px[j * 4 + 2] = c[2]; px[j * 4 + 3] = 255; };
 
@@ -147,9 +164,10 @@ function staticLayer(map) {
       const d = seaDist[j];
       let c;
       if (d === 1) c = COLORS.foam;
-      else if (d === 2) c = COLORS.shallow;
-      else if (d === 3) c = (x + y) % 2 ? COLORS.shallow : COLORS.shallow2;
-      else if (d === 4) c = COLORS.shallow2;
+      else if (d === 2) c = (x + y) % 2 ? COLORS.foam : COLORS.shallow;
+      else if (d <= 4) c = COLORS.shallow;
+      else if (d === 5) c = (x + y) % 2 ? COLORS.shallow : COLORS.shallow2;
+      else if (d <= 7) c = COLORS.shallow2;
       else c = deepWater(x, y);
       put(j, c);
       continue;
@@ -157,12 +175,13 @@ function staticLayer(map) {
     // País vecino: ladera cerca de Chile, nubes más allá.
     const d = slopeDist[j];
     let c;
-    if (d === 1) c = COLORS.slopeDark;
-    else if (d === 2) c = COLORS.slope;
-    else if (d === 3) c = (x + y) % 2 ? COLORS.slopeLight : COLORS.slope;
-    else if (d === 4) c = (x + y) % 2 ? COLORS.slopeLight : COLORS.cloudShade;
+    if (d <= 2) c = COLORS.slopeDark;
+    else if (d === 3) c = (x + y) % 2 ? COLORS.slope : COLORS.slopeDark;
+    else if (d === 4) c = COLORS.slope;
+    else if (d === 5) c = (x + y) % 2 ? COLORS.slopeLight : COLORS.slope;
+    else if (d === 6) c = (x + y) % 2 ? COLORS.slopeLight : COLORS.cloudShade;
     else {
-      const n = noise(x + 0.5 * y, y, 7) * 0.7 + noise(x, y, 3) * 0.3;
+      const n = noise(x + 0.5 * y, y, 11) * 0.7 + noise(x, y, 4) * 0.3;
       c = n > 0.62 ? COLORS.cloudLight : n < 0.36 ? COLORS.cloudShade : COLORS.cloud;
       if (seaDist[j] === 0) {
         // borde de nube sobre el mar
@@ -176,23 +195,24 @@ function staticLayer(map) {
   // Destellos en el mar abierto.
   for (let y = 0; y < h; y++) for (let x = 0; x < w - 2; x++) {
     const j = y * w + x;
-    if (seaDist[j] >= 6 && seaDist[j + 1] >= 6 && seaDist[j + 2] >= 6 && hash(x, y) < 0.012) {
-      put(j, COLORS.sparkle); put(j + 1, COLORS.sparkle);
+    if (seaDist[j] >= 9 && seaDist[j + 1] >= 9 && seaDist[j + 2] >= 9 && hash(x, y) < 0.008) {
+      put(j, COLORS.sparkle); put(j + 1, COLORS.sparkle); put(j + 2, COLORS.sparkle);
     }
   }
 
   // Cumbres nevadas sobre la ladera, a lo largo del borde oriental.
-  for (let y = 3; y < h; y++) {
-    if ((y + Math.floor(hash(1, y) * 3)) % 6 !== 0) continue;
+  const PH = PEAK.length, PW = PEAK[0].length;
+  for (let y = PH; y < h; y++) {
+    if ((y + Math.floor(hash(1, y) * 4)) % 9 !== 0) continue;
     for (let x = 1; x < w; x++) {
       const j = y * w + x;
       if (!(isOther(j) && isChile(j - 1)) || inInset(x, y)) continue;
-      const ox = x + 1, oy = y - 3;
-      for (let r = 0; r < 4; r++) for (let c = 0; c < 5; c++) {
+      const ox = x + 1, oy = y - PH + 1;
+      for (let r = 0; r < PH; r++) for (let c = 0; c < PW; c++) {
         const ch = PEAK[r][c];
         const tx = ox + c, ty = oy + r, tj = ty * w + tx;
         if (ch === '.' || tx >= w || ty < 0 || ty >= h || !isOther(tj)) continue;
-        put(tj, ch === 'S' ? COLORS.snow : ch === 's' ? COLORS.snowShade : COLORS.rock);
+        put(tj, ch === 'S' ? COLORS.snow : ch === 's' ? COLORS.snowShade : ch === 'r' ? COLORS.slopeDark : COLORS.rock);
       }
       break;
     }
@@ -369,20 +389,23 @@ export class PixelMap {
 // ---------------------------------------------------------------------------
 // "Pósters": la silueta del lugar como una isla en el mar
 // ---------------------------------------------------------------------------
-const POSTER_W = 40, POSTER_H = 60;
+export const POSTER_SIZES = { small: [64, 96], large: [112, 168] };
 
 /**
- * Dibuja la silueta en un canvas de 40×60 px lógicos.
+ * Dibuja la silueta del lugar como una isla en el mar.
  * @param {object[]} maps candidatos (el que contenga mejor el lugar)
  * @param {(type, code) => string|null} stateOf
+ * @param {{size?: 'small'|'large', icons?: boolean}} [opts]
+ *   icons: dibuja los íconos de las comunas visitadas (imagen grande).
  */
-export function posterCanvas(type, code, maps, stateOf) {
+export function posterCanvas(type, code, maps, stateOf, { size = 'small', icons = false } = {}) {
+  const [PW, PH] = POSTER_SIZES[size];
   const canvas = document.createElement('canvas');
-  canvas.width = POSTER_W;
-  canvas.height = POSTER_H;
+  canvas.width = PW;
+  canvas.height = PH;
   canvas.className = 'poster-canvas';
   const ctx = canvas.getContext('2d');
-  const img = ctx.createImageData(POSTER_W, POSTER_H);
+  const img = ctx.createImageData(PW, PH);
 
   let best = null;
   for (const m of maps) {
@@ -396,16 +419,16 @@ export function posterCanvas(type, code, maps, stateOf) {
   }
 
   // Máscara de la silueta en coordenadas del póster (código de comuna por pixel).
-  const mask = new Int32Array(POSTER_W * POSTER_H);
-  const regionOf = new Int32Array(POSTER_W * POSTER_H);
+  const mask = new Int32Array(PW * PH);
+  const regionOf = new Int32Array(PW * PH);
   if (best) {
     const { m, b } = best;
     const bw = b.x1 - b.x0 + 1, bh = b.y1 - b.y0 + 1;
-    const pad = 5;
-    const k = Math.min((POSTER_W - pad * 2) / bw, (POSTER_H - pad * 2) / bh);
+    const pad = Math.round(PW * 0.12);
+    const k = Math.min((PW - pad * 2) / bw, (PH - pad * 2) / bh);
     const scale = k >= 1 ? Math.floor(k) : k;
     const ow = Math.round(bw * scale), oh = Math.round(bh * scale);
-    const ox = Math.floor((POSTER_W - ow) / 2), oy = Math.floor((POSTER_H - oh) / 2);
+    const ox = Math.floor((PW - ow) / 2), oy = Math.floor((PH - oh) / 2);
     for (let py = oy; py < oy + oh; py++) for (let px = ox; px < ox + ow; px++) {
       const sx = b.x0 + Math.floor((px - ox) / scale), sy = b.y0 + Math.floor((py - oy) / scale);
       if (sx > b.x1 || sy > b.y1) continue;
@@ -415,22 +438,27 @@ export function posterCanvas(type, code, maps, stateOf) {
         const inInset = m.insets.some((r) => sx >= r.x && sx < r.x + r.w && sy >= r.y && sy < r.y + r.h);
         if (!inInset && m.region[j] === code) c = m.comuna[j];
       } else if (m.comuna[j] === code) c = code;
-      mask[py * POSTER_W + px] = c;
-      regionOf[py * POSTER_W + px] = c ? m.region[j] : 0;
+      mask[py * PW + px] = c;
+      regionOf[py * PW + px] = c ? m.region[j] : 0;
     }
   }
 
-  const dist = distanceField(POSTER_W, POSTER_H, (j) => mask[j] !== 0, (j) => mask[j] === 0, 3);
+  const dist = distanceField(PW, PH, (j) => mask[j] !== 0, (j) => mask[j] === 0, 5);
   const regionVisited = type === 'region' && stateOf('region', code) === 'visited';
-  const put = (x, y, c) => img.data.set([c[0], c[1], c[2], 255], (y * POSTER_W + x) * 4);
-  const at = (x, y) => (x < 0 || y < 0 || x >= POSTER_W || y >= POSTER_H ? 0 : mask[y * POSTER_W + x]);
-  for (let y = 0; y < POSTER_H; y++) for (let x = 0; x < POSTER_W; x++) {
-    const j = y * POSTER_W + x;
+  const put = (x, y, c) => img.data.set([c[0], c[1], c[2], 255], (y * PW + x) * 4);
+  const at = (x, y) => (x < 0 || y < 0 || x >= PW || y >= PH ? 0 : mask[y * PW + x]);
+  for (let y = 0; y < PH; y++) for (let x = 0; x < PW; x++) {
+    const j = y * PW + x;
     const c = mask[j];
     if (!c) {
       const d = dist[j];
-      let col = d === 1 ? COLORS.foam : d === 2 ? COLORS.shallow : d === 3 ? COLORS.shallow2 : deepWater(x + code, y);
-      if (d > 3 && hash(x + code, y) < 0.02) col = COLORS.sparkle;
+      let col;
+      if (d === 1) col = COLORS.foam;
+      else if (d === 2) col = (x + y) % 2 ? COLORS.foam : COLORS.shallow;
+      else if (d <= 4) col = COLORS.shallow;
+      else if (d === 5) col = (x + y) % 2 ? COLORS.shallow : COLORS.shallow2;
+      else col = deepWater(x + code, y);
+      if (d > 5 && hash(x + code, y) < 0.012) col = COLORS.sparkle;
       put(x, y, col);
       continue;
     }
@@ -447,8 +475,53 @@ export function posterCanvas(type, code, maps, stateOf) {
     else col = pal.base;
     put(x, y, col);
   }
+
+  if (icons) placeIcons(img, type, code, mask, regionOf, stateOf);
   ctx.putImageData(img, 0, 0);
   return canvas;
+}
+
+/** Íconos de las comunas visitadas, sobre su ubicación en la silueta. */
+function placeIcons(img, type, code, mask, regionOf, stateOf) {
+  const PW = img.width, PH = img.height;
+  // Centro de cada comuna en el póster.
+  const sums = new Map();
+  for (let j = 0; j < mask.length; j++) {
+    const c = mask[j];
+    if (!c) continue;
+    let s = sums.get(c);
+    if (!s) sums.set(c, (s = { x: 0, y: 0, n: 0, region: regionOf[j] }));
+    s.x += j % PW; s.y += Math.floor(j / PW); s.n++;
+  }
+  if (type === 'comuna') {
+    const s = sums.get(code);
+    if (!s || stateOf('comuna', code) !== 'visited') return;
+    const { sprites } = landmarksFor({ code, region: s.region });
+    // En la imagen grande, los íconos de la comuna se dibujan al doble.
+    const k = PW >= 100 ? 2 : 1, size = 16 * k;
+    const cx = s.x / s.n, cy = s.y / s.n;
+    const n = Math.min(2, sprites.length);
+    const clamp = (v, max) => Math.max(1, Math.min(max - size - 1, Math.round(v)));
+    sprites.slice(0, n).forEach((sp, i) => {
+      const dx = n === 2 ? (i ? 1 : -size - 1) : -size / 2;
+      drawSprite(img, sp, clamp(cx + dx, PW), clamp(cy - size / 2, PH), { scale: k });
+    });
+    return;
+  }
+  const clampX = (x) => Math.max(1, Math.min(PW - 17, Math.round(x)));
+  const clampY = (y) => Math.max(1, Math.min(PH - 17, Math.round(y)));
+  // Región: un ícono por comuna visitada, primero las que tienen íconos propios, sin encimarse.
+  const items = [...sums].filter(([c]) => stateOf('comuna', c) === 'visited')
+    .map(([c, s]) => ({ c, s, lm: landmarksFor({ code: c, region: s.region }) }))
+    .sort((a, b) => (b.lm.own - a.lm.own) || (b.s.n - a.s.n));
+  const placed = [];
+  for (const it of items) {
+    if (placed.length >= 10) break;
+    const x = clampX(it.s.x / it.s.n - 8), y = clampY(it.s.y / it.s.n - 8);
+    if (placed.some((p) => Math.abs(p.x - x) < 15 && Math.abs(p.y - y) < 15)) continue;
+    drawSprite(img, it.lm.sprites[0], x, y);
+    placed.push({ x, y });
+  }
 }
 
 // ---------------------------------------------------------------------------

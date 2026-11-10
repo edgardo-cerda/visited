@@ -368,7 +368,7 @@ export function openLogEditor(type, code) {
       <button type="submit" class="btn btn-primary">Guardar</button>
     </div>
   </form>`);
-  form.querySelector('.le-poster').append(posterCanvas(type, code, mapsFor(type, code), (t, c) => stateIn(store.logs, t, c)));
+  form.querySelector('.le-poster').append(posterCanvas(type, code, mapsFor(type, code), (t, c) => stateIn(store.logs, t, c), { icons: true }));
   form.querySelector('.le-stars').append(starInput(rating, (v) => { rating = v; }));
   const dlg = modal(form, { title: log.visited ? 'Editar registro' : 'Registrar visita', wide: true });
   const err = form.querySelector('.form-error');

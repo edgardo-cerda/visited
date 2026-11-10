@@ -65,6 +65,10 @@ const EXTRA_COMUNAS = [
   { code: 12202, name: 'Antártica', province: 'Antártica Chilena', region: 12, areaKm2: null },
 ];
 
+/** Resolución de los mapas: multiplica la cantidad de pixeles por lado. */
+const RES = 1.6;
+const R = (n) => Math.max(1, Math.round(n * RES));
+
 const ISLAND_RAPA_NUI = 5201;
 const ISLAND_JUAN_FERNANDEZ = 5104;
 const ANTARTICA = 12202;
@@ -254,7 +258,7 @@ function rasterize({ items, project, cell, bounds, margin = 1, valueAt }) {
  * Rellena huecos de 1-2 celdas entre Chile y un país vecino (los límites de
  * Natural Earth y de la BCN no calzan perfecto) para que no parezcan mar.
  */
-function fillBorderGaps(grid, reach = 2) {
+function fillBorderGaps(grid, reach = R(2)) {
   const { w, h, data } = grid;
   const kind = (x, y) => {
     if (x < 0 || y < 0 || x >= w || y >= h) return 0;
@@ -293,7 +297,7 @@ function noise2(x, y, s) {
  * Deja los países vecinos sólo como una franja de ancho irregular junto a
  * Chile (cordillera + nubes), en vez de rectángulos cortados por el borde.
  */
-function trimNeighbours(grid, min = 5, extra = 6) {
+function trimNeighbours(grid, min = R(9), extra = R(8)) {
   const { w, h, data } = grid;
   const dist = new Uint8Array(w * h).fill(255);
   let frontier = [];
@@ -344,7 +348,7 @@ function findSpot(grid, w, h, prefer, reserved = []) {
 }
 
 /** Pega recuadros buscando espacio libre; si no hay, agranda la grilla. */
-const LABEL_ROWS = 4; // espacio bajo cada recuadro para su etiqueta
+const LABEL_ROWS = R(4); // espacio bajo cada recuadro para su etiqueta
 
 function placeInsets(grid, insets, prefer, growSide = 'left') {
   const placed = [];
@@ -452,7 +456,7 @@ async function main() {
     const lat0 = (b.y0 + b.y1) / 2;
     const proj = equirect(lat0);
     const wProj = (b.x1 - b.x0) * Math.cos(lat0 * D2R);
-    return frame(rasterize({ items: [{ value: valueOf.get(code), parts: ps, ensure: true }], project: proj, cell: wProj / targetW, margin: 2 }));
+    return frame(rasterize({ items: [{ value: valueOf.get(code), parts: ps, ensure: true }], project: proj, cell: wProj / R(targetW), margin: R(2) }));
   };
 
   const antarcticInset = (targetW) => {
@@ -463,7 +467,7 @@ async function main() {
     const [, yBottom] = proj(lonc, -80);
     const halfW = Math.abs(proj(-53, -61.2)[0]) * 1.1;
     const bounds = { x0: -halfW, x1: halfW, y0: yTop, y1: yBottom };
-    const cell = (2 * halfW) / targetW;
+    const cell = (2 * halfW) / R(targetW);
     const items = land.features
       .map((f) => parts(f.geometry).filter((p) => bboxOf([p]).y0 < -59))
       .filter((ps) => ps.length)
@@ -505,7 +509,7 @@ async function main() {
   // --- Mapa nacional: tres tramos (norte, centro, sur) + recuadros ---------
   {
     const proj = sinusoidal(-71);
-    const cell = 0.07;
+    const cell = 0.07 / RES;
     const strips = [
       { label: 'NORTE', regions: [15, 1, 2, 3, 4] },
       { label: 'CENTRO', regions: [5, 13, 6, 7, 16, 8, 9, 14, 10] },
@@ -518,10 +522,10 @@ async function main() {
         const [X, Y] = proj(lon, lat);
         b.x0 = Math.min(b.x0, X); b.x1 = Math.max(b.x1, X); b.y0 = Math.min(b.y0, Y); b.y1 = Math.max(b.y1, Y);
       }
-      const bounds = { x0: b.x0 - 2 * cell, x1: b.x1 + 9 * cell, y0: b.y0 - cell, y1: b.y1 + cell };
+      const bounds = { x0: b.x0 - R(2) * cell, x1: b.x1 + R(9) * cell, y0: b.y0 - cell, y1: b.y1 + cell };
       return { ...s, grid: trimNeighbours(fillBorderGaps(rasterize({ items: [...neighbours, ...own], project: proj, cell, bounds, margin: 0 }))) };
     });
-    const gap = 3, top = 7;
+    const gap = R(3), top = R(7);
     const W = strips.reduce((s, x) => s + x.grid.w, 0) + gap * (strips.length - 1);
     const H = Math.max(...strips.map((s) => s.grid.h)) + top;
     let grid = new Grid(W, H);
@@ -529,7 +533,7 @@ async function main() {
     let ox = 0;
     for (const s of strips) {
       grid.blit(s.grid, ox, top);
-      labels.push({ text: s.label, x: ox + s.grid.w / 2, y: 2.5 });
+      labels.push({ text: s.label, x: ox + s.grid.w / 2, y: top * 0.4 });
       ox += s.grid.w + gap;
     }
     const res = placeInsets(grid, [insets.rapanui(), insets.jf(), insets.antartica()], ['right'], 'right');
@@ -545,10 +549,10 @@ async function main() {
     const proj = equirect(lat0);
     const kx = Math.cos(lat0 * D2R);
     const longest = Math.max((b.x1 - b.x0) * kx, b.y1 - b.y0);
-    // Celda: ~110 pixeles en el lado mayor, pero la comuna más chica debe tener >= 3 pixeles.
     const smallest = Math.min(...comunas.filter((c) => c.region === r.code && c.areaKm2).map((c) => c.areaKm2));
-    let cell = Math.min(longest / 110, Math.sqrt(smallest / 3) / 111);
-    cell = Math.max(cell, longest / 200);
+    // Celda: ~176 pixeles en el lado mayor, pero la comuna más chica debe tener >= 8 pixeles.
+    let cell = Math.min(longest / (110 * RES), Math.sqrt(smallest / 8) / 111);
+    cell = Math.max(cell, longest / (200 * RES));
     const pad = 0.04 * longest;
     const window = { x0: b.x0 - pad / kx, x1: b.x1 + pad / kx, y0: b.y0 - pad, y1: b.y1 + pad };
     // Comunas vecinas (otras regiones) también se dibujan, atenuadas en el cliente.
@@ -572,7 +576,7 @@ async function main() {
     const proj = equirect(lat0);
     const [px0, py1] = proj(window.x0, window.y0);
     const [px1, py0] = proj(window.x1, window.y1);
-    const cell = (px1 - px0) / 112;
+    const cell = (px1 - px0) / (112 * RES);
     const items = mainlandItems((c) => bboxIntersects(bboxOf(geom.get(c.code)), window)).map((it) => ({ ...it, fit: false }));
     const grid = rasterize({ items, project: proj, cell, bounds: { x0: px0, x1: px1, y0: py0, y1: py1 }, margin: 0 });
     maps.santiago = { title: 'Gran Santiago', region: 13, w: grid.w, h: grid.h, labels: [], insets: [], rle: rle(grid.data) };

@@ -2,6 +2,7 @@ import { html, mount, $, $$, fmtNum, fmtDate } from '../html.js';
 import { api } from '../api.js';
 import { store, me, getMap, getLog, stateIn, placeName, saveLog, myProgress } from '../store.js';
 import { PixelMap, posterCanvas } from '../pixelmap.js';
+import { landmarksFor, spriteCanvas } from '../landmarks.js';
 import {
   icon, stars, starInput, fmtRating, mapsFor, poster, reviewCard, openLogEditor, quickToggle, toast, levelUpCheck,
   bar, emptyState, confirmDialog,
@@ -18,7 +19,10 @@ export async function placeView(ctx, type, code) {
 
   mount(ctx.root, html`
     <section class="place">
-      <div class="place-poster" id="place-poster"></div>
+      <div class="place-side">
+        <div class="place-poster" id="place-poster"></div>
+        <div class="landmarks" id="place-landmarks"></div>
+      </div>
       <div class="place-main">
         <p class="kicker">${type === 'region' ? html`Región ${place.roman}` : html`Comuna · Provincia de ${place.province}`}</p>
         <h1>${place.name}</h1>
@@ -73,7 +77,38 @@ export async function placeView(ctx, type, code) {
 
   // Póster grande
   const posterBox = $('#place-poster');
-  const paintPoster = () => posterBox.replaceChildren(posterCanvas(type, code, mapsFor(type, code), (t, c) => stateIn(store.logs, t, c)));
+  const landmarksBox = $('#place-landmarks');
+  const paintPoster = () => {
+    posterBox.replaceChildren(posterCanvas(type, code, mapsFor(type, code), (t, c) => stateIn(store.logs, t, c), { size: 'large', icons: true }));
+    // Íconos descubiertos (o por descubrir) bajo la imagen.
+    let sprites, discovered;
+    if (type === 'comuna') {
+      sprites = landmarksFor(place).sprites;
+      discovered = stateIn(store.logs, 'comuna', code) === 'visited';
+    } else {
+      const seen = new Map();
+      for (const c of store.catalog.comunasByRegion.get(code)) {
+        if (stateIn(store.logs, 'comuna', c.code) !== 'visited') continue;
+        for (const sp of landmarksFor(c).sprites) seen.set(sp.id, sp);
+      }
+      sprites = [...seen.values()];
+      discovered = sprites.length > 0;
+    }
+    if (!discovered) {
+      const n = type === 'comuna' ? sprites.length : null;
+      mount(landmarksBox, html`<p class="landmarks-hint">${icon('eye')} ${type === 'comuna'
+        ? `Márcala como visitada para descubrir ${n === 1 ? 'su ícono' : `sus ${n} íconos`}.`
+        : 'Visita comunas de esta región para descubrir sus íconos.'}</p>`);
+      return;
+    }
+    mount(landmarksBox, html`<p class="section-label">Descubriste</p><ul class="landmark-list"></ul>`);
+    const ul = landmarksBox.querySelector('ul');
+    for (const sp of sprites.slice(0, 12)) {
+      const li = document.createElement('li');
+      li.append(spriteCanvas(sp), document.createTextNode(sp.name));
+      ul.append(li);
+    }
+  };
   paintPoster();
 
   // Panel de acciones
