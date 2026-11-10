@@ -3,6 +3,7 @@ import { api, getSession, setSession, handleUnauthorized } from './api.js';
 import { computeProgress } from './shared/progress.js';
 import { norm } from './html.js';
 import { url } from './config.js';
+import { loadImageData } from './png.js';
 
 const listeners = new Map();
 export function on(evt, fn) {
@@ -59,8 +60,21 @@ export const placeUrl = (type, code) => `/${type}/${code}`;
 let mapsRaw = null;
 const decoded = new Map();
 
+const art = new Map();
+let posterOcean = null;
+
+/**
+ * Carga las grillas (qué comuna hay en cada pixel) y el arte de cada mapa
+ * (public/img/maps/<id>.png, editable). Ver docs/ARTE.md.
+ */
 export async function loadMaps() {
   mapsRaw = await (await fetch(url('/data/maps.json'))).json();
+  await Promise.all([
+    ...Object.entries(mapsRaw.maps).map(async ([id, m]) => {
+      art.set(id, (await loadImageData(url(`/img/maps/${id}.png`), { width: m.w, height: m.h })).data);
+    }),
+    loadImageData(url('/img/poster-ocean.png')).then((img) => { posterOcean = img; }),
+  ]);
 }
 
 export function getMap(id) {
@@ -86,10 +100,13 @@ export function getMap(id) {
       region[j] = regionOf.get(comuna[j]) || 0;
     }
   }
-  const map = { id, ...m, rle: undefined, data, comuna, region, special: mapsRaw.special };
+  const map = { id, ...m, rle: undefined, data, comuna, region, special: mapsRaw.special, art: art.get(id) };
   decoded.set(id, map);
   return map;
 }
+
+/** Fondo de mar (ImageData) para las imágenes de cada lugar. */
+export const getPosterOcean = () => posterOcean;
 
 /** Bbox y cantidad de celdas de cada comuna/región en un mapa (para siluetas). */
 export function mapIndex(map) {

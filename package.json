@@ -11,7 +11,8 @@
     "start": "node --disable-warning=ExperimentalWarning server/index.js",
     "dev": "node --disable-warning=ExperimentalWarning --watch server/index.js",
     "build:geo": "node scripts/build-geo.mjs",
-    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
+    "build:art": "node scripts/build-art.mjs"
   },
   "license": "MIT",
   "dependencies": {

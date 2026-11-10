@@ -6,7 +6,7 @@ Una bitácora de viajes estilo Letterboxd, pero con **las 16 regiones y 346 comu
 - Ponles nota de **½ a 5 estrellas** (con medias estrellas), escribe reseñas o agrégalos a **"Quiero ir"**.
 - Vota las reseñas de otros con 👍 / 👎: se muestran primero las de más votos netos.
 - Descubre tu **mapa pixel art** de Chile: lo que no has visitado está bajo la niebla y se despeja con cada viaje (modo regiones o comunas). Mar, desierto, valles, bosques, los Andes y nubes sobre los países vecinos; recuadros para Rapa Nui, Juan Fernández y la Antártica, y un zoom del Gran Santiago.
-- Al visitar una comuna, su imagen muestra **íconos pixel art de lo que la representa** (moáis en Isla de Pascua, ascensores en Valparaíso, géiseres y flamencos en San Pedro de Atacama…): 40 íconos, propios para 92 comunas y uno típico de cada zona para el resto (`public/js/landmarks.js`).
+- Al visitar una comuna, su imagen muestra **íconos pixel art de lo que la representa** (moáis en Isla de Pascua, ascensores en Valparaíso, géiseres y flamencos en San Pedro de Atacama…): 40 íconos, propios para 92 comunas y uno típico de cada zona para el resto.
 - Sube de **nivel** (XP), revisa tu progreso por región y desbloquea **logros**.
 - Perfiles públicos, páginas de cada lugar con promedio, histograma y reseñas de la comunidad.
 
@@ -73,9 +73,20 @@ public/            Web (SPA en JavaScript sin build)
   js/pixelmap.js   render del mapa pixel art, pósters y avatares
   data/            catálogo y mapas generados
 scripts/build-geo.mjs   genera public/data a partir de los límites oficiales
+scripts/build-art.mjs   genera el arte inicial (public/img/maps/*.png)
+public/img/        arte editable: mapas, íconos y fondo de mar
 test/              pruebas de la API (node:test)
 docs/API.md        referencia de la API
 ```
+
+## Arte (PNG editables)
+
+Todo el pixel art se lee de PNG en `public/img/` que puedes editar con cualquier editor de pixel art:
+
+- `img/maps/*.png`: el dibujo del país, de cada región y del Gran Santiago (como se ve todo visitado; la niebla gris de lo no visitado se calcula al mostrarlo).
+- `img/landmarks.png` + `img/landmarks.json`: la hoja de íconos (16×16) y qué ícono usa cada comuna.
+
+Guía completa en **[docs/ARTE.md](docs/ARTE.md)**. `npm run build:art` regenera el arte inicial sin pisar archivos existentes.
 
 ## Datos geográficos
 

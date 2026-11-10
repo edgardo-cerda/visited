@@ -2,6 +2,7 @@ import { html, mount, $, esc, el } from './html.js';
 import { BASE, DEMO, url, appPath, stripBase } from './config.js';
 import { store, on, me, loadCatalog, loadMaps, refreshMe, searchPlaces, placeUrl } from './store.js';
 import { avatar, loading, toast } from './components.js';
+import { loadLandmarks } from './landmarks.js';
 import { homeView } from './views/home.js';
 import { loginView, registerView } from './views/auth.js';
 import { exploreView } from './views/explore.js';
@@ -141,7 +142,7 @@ if (DEMO) {
 
 async function start() {
   mount(app, loading());
-  await Promise.all([loadCatalog(), loadMaps()]);
+  await Promise.all([loadCatalog(), loadMaps(), loadLandmarks()]);
   setupSearch();
   on('session', renderNav);
   if (store.session?.token) {
