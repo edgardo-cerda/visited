@@ -52,11 +52,11 @@ En `chile.png` los pixeles **transparentes** son "nada": la web muestra ahí el 
 
 | Archivo | Qué es |
 |---|---|
-| `public/img/favicon.svg` | Ícono de la pestaña (montaña con la bandera de Chile, 32×32). |
-| `public/img/favicon-32.png` | El mismo ícono en PNG, para navegadores sin soporte de SVG. |
-| `public/img/apple-touch-icon.png` | El mismo ícono a 192×192, para la pantalla de inicio del celular. |
+| `public/img/icono.svg` | Ícono de la pestaña (montaña con la bandera de Chile, 32×32). |
+| `public/img/icono-32.png` | El mismo ícono en PNG, para navegadores sin soporte de SVG. |
+| `public/img/icono-192.png` | El mismo ícono a 192×192, para la pantalla de inicio del celular. |
 
-El logo de la barra superior es el mismo dibujo, incrustado en `public/index.html`. Si cambias el ícono, sube el número de `?v=2` en los `<link rel="icon">` de `index.html` para que los navegadores no muestren el antiguo guardado en caché.
+El logo de la barra superior es el mismo dibujo, incrustado en `public/index.html`. Los navegadores guardan el ícono en caché con mucha insistencia: si lo cambias y no se actualiza, guárdalo con otro nombre de archivo (y actualiza los `<link rel="icon">` de `index.html`).
 
 ## Regenerar desde cero
 
