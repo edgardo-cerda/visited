@@ -158,14 +158,23 @@ export async function quickToggle(type, code, act) {
     patch = { visited: !log?.visited };
   } else patch = { wishlist: !log?.wishlist };
   try {
-    const { log: next, before, after } = await saveLog(type, code, patch);
+    const { log: next, regionLogs, before, after } = await saveLog(type, code, patch);
     if (act === 'visited') {
       const gained = after.level.xp - before.level.xp;
       toast(next?.visited ? `${name}: visitado (+${gained} XP)` : `${name}: quitado de tus visitas`, next?.visited ? 'ok' : '');
     } else toast(next?.wishlist ? `${name} en "Quiero ir"` : `${name} fuera de "Quiero ir"`, 'info');
+    regionsMarkedToast(regionLogs);
     levelUpCheck(before, after);
   } catch (e) {
     toast(e.message, 'error');
+  }
+}
+
+/** Avisa qué regiones quedaron marcadas automáticamente al visitar una comuna. */
+export function regionsMarkedToast(regionLogs = []) {
+  for (const r of regionLogs) {
+    const reg = store.catalog.regionByCode.get(r.code);
+    toast(`También marcamos la Región ${reg.roman} · ${reg.shortName} como visitada`, 'ok', 3500);
   }
 }
 
@@ -382,9 +391,10 @@ export function openLogEditor(type, code) {
       ...extra,
     };
     try {
-      const { before, after } = await saveLog(type, code, patch);
+      const { regionLogs, before, after } = await saveLog(type, code, patch);
       dlg.close();
       toast(patch.review ? 'Reseña guardada' : 'Visita registrada', 'ok');
+      regionsMarkedToast(regionLogs);
       levelUpCheck(before, after);
     } catch (e2) {
       err.hidden = false;

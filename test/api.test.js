@@ -75,17 +75,41 @@ test('/me requiere token', async () => {
   assert.equal(r.body.user.username, 'viajera');
 });
 
-test('marcar comunas y regiones por separado', async () => {
-  let r = await call('PUT', '/me/logs/comuna/13101', { token, body: { visited: true } });
+test('visitar una comuna marca su región', async () => {
+  // Una región se puede marcar sola, sin comunas.
+  let r = await call('PUT', '/me/logs/region/15', { token, body: { visited: true } });
+  assert.equal(r.body.log.type, 'region');
+  assert.deepEqual(r.body.regionLogs, []);
+  r = await call('PUT', '/me/logs/region/15', { token, body: { visited: false } });
+  assert.equal(r.body.log, null, 'sin comunas visitadas, la región se puede desmarcar');
+
+  r = await call('PUT', '/me/logs/comuna/13101', { token, body: { visited: true } });
   assert.equal(r.status, 200);
   assert.equal(r.body.log.visited, true);
-
-  // Marcar una comuna no marca su región.
+  assert.deepEqual(r.body.regionLogs.map((l) => [l.type, l.code, l.visited]), [['region', 13, true]]);
   r = await call('GET', '/me/logs/region/13', { token });
-  assert.equal(r.body.log, null);
+  assert.equal(r.body.log.visited, true);
 
-  r = await call('PUT', '/me/logs/region/13', { token, body: { visited: true } });
-  assert.equal(r.body.log.type, 'region');
+  // Ya marcada: no se repite.
+  r = await call('PUT', '/me/logs/comuna/13101', { token, body: { visited: true } });
+  assert.deepEqual(r.body.regionLogs, []);
+
+  // No se puede desmarcar una región con comunas visitadas.
+  r = await call('PUT', '/me/logs/region/13', { token, body: { visited: false } });
+  assert.equal(r.status, 409);
+  assert.equal((await call('DELETE', '/me/logs/region/13', { token })).status, 409);
+  r = await call('POST', '/me/logs/batch', { token, body: { items: [{ type: 'region', code: 13, visited: false }] } });
+  assert.ok(r.body.logs.find((l) => l.type === 'region' && l.code === 13).visited, 'la carga masiva tampoco la desmarca');
+
+  // "Quiero ir" en la región pasa a visitada al marcar una comuna.
+  await call('PUT', '/me/logs/region/2', { token, body: { wishlist: true } });
+  r = await call('PUT', '/me/logs/comuna/2101', { token, body: { visited: true } });
+  assert.equal(r.body.regionLogs[0].visited, true);
+  assert.equal(r.body.regionLogs[0].wishlist, false);
+  // Desmarcar la comuna no desmarca la región; y ahí sí se puede desmarcar.
+  await call('PUT', '/me/logs/comuna/2101', { token, body: { visited: false } });
+  assert.equal((await call('GET', '/me/logs/region/2', { token })).body.log.visited, true);
+  assert.equal((await call('PUT', '/me/logs/region/2', { token, body: { visited: false } })).body.log, null);
 
   r = await call('PUT', '/me/logs/comuna/99999', { token, body: { visited: true } });
   assert.equal(r.status, 404);
@@ -149,11 +173,12 @@ test('progreso, nivel y logros', async () => {
   const r = await call('GET', '/me/progress', { token });
   assert.equal(r.status, 200);
   assert.equal(r.body.comunas.visited, 3);
-  assert.equal(r.body.regions.visited, 1);
+  // Regiones 13 (Santiago), 5 (Isla de Pascua) y 12 (Cabo de Hornos: se marcó y la comuna luego se desmarcó)
+  assert.equal(r.body.regions.visited, 3);
   assert.equal(r.body.counts.reviews, 1);
-  // 3 comunas * 10 + 1 región * 40 + 1 reseña * 5 + 1 nota * 1
-  assert.equal(r.body.level.xp, 76);
-  assert.equal(r.body.level.level, 2);
+  // 3 comunas * 10 + 3 regiones * 40 + 1 reseña * 5 + 1 nota * 1
+  assert.equal(r.body.level.xp, 156);
+  assert.equal(r.body.level.level, 3);
   assert.ok(r.body.badges.find((b) => b.id === 'rapa-nui').earned);
   assert.equal(r.body.byRegion.find((x) => x.code === 13).visitedComunas, 2);
 });
@@ -235,7 +260,7 @@ test('perfil público no expone email', async () => {
   assert.equal(r.body.summary.comunas.visited, 3);
   assert.equal((await call('GET', '/users/nadie')).status, 404);
   const logs = await call('GET', '/users/viajera/logs?type=region');
-  assert.equal(logs.body.logs.length, 1);
+  assert.equal(logs.body.logs.length, 3);
 });
 
 test('CORS para apps', async () => {

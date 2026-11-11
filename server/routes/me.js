@@ -20,6 +20,34 @@ export function clearOrphanVotes(db, userId) {
   db.prepare('DELETE FROM review_votes WHERE log_id IN (SELECT id FROM logs WHERE user_id = ? AND review IS NULL)').run(userId);
 }
 
+/**
+ * Regla: si visitaste alguna comuna de una región, la región queda visitada.
+ * Marca las regiones que falten y devuelve sus registros.
+ * (El código de región es el código CUT de la comuna dividido por 1000.)
+ */
+export function syncRegions(db, userId) {
+  const missing = db.prepare(`
+    SELECT DISTINCT c.place_code / 1000 AS region FROM logs c
+    WHERE c.user_id = ? AND c.place_type = 'comuna' AND c.visited = 1
+      AND NOT EXISTS (SELECT 1 FROM logs r WHERE r.user_id = c.user_id AND r.place_type = 'region'
+                      AND r.place_code = c.place_code / 1000 AND r.visited = 1)`).all(userId);
+  const now = new Date().toISOString();
+  const up = db.prepare(`
+    INSERT INTO logs (user_id, place_type, place_code, visited, wishlist, created_at, updated_at) VALUES (?, 'region', ?, 1, 0, ?, ?)
+    ON CONFLICT (user_id, place_type, place_code) DO UPDATE SET visited = 1, wishlist = 0, updated_at = excluded.updated_at`);
+  const get = db.prepare("SELECT * FROM logs WHERE user_id = ? AND place_type = 'region' AND place_code = ?");
+  return missing.map(({ region }) => { up.run(userId, region, now, now); return get.get(userId, region); });
+}
+
+/** No se puede desmarcar una región que tiene comunas visitadas. */
+function assertRegionCanBeUnvisited(db, userId, region) {
+  const { n } = db.prepare("SELECT COUNT(*) AS n FROM logs WHERE user_id = ? AND place_type = 'comuna' AND visited = 1 AND place_code / 1000 = ?")
+    .get(userId, region);
+  if (n > 0) {
+    throw conflict(`Visitaste ${n} comuna${n === 1 ? '' : 's'} de esta región, así que la región queda marcada como visitada. Desmárcala${n === 1 ? '' : 's'} primero.`);
+  }
+}
+
 export const progressFor = (db, userId) => computeProgress(catalog, loadLogs(db, userId));
 
 function placeParams(req) {
@@ -85,6 +113,8 @@ export function meRoutes(db) {
    *  - visited:false borra nota, reseña, fecha y "me gusta".
    *  - "Quiero ir" (wishlist) sólo aplica a lugares no visitados.
    *  - Si nada queda marcado, el registro se elimina.
+   *  - Visitar una comuna marca también su región (se devuelve en `regionLogs`).
+   *  - Una región con comunas visitadas no se puede desmarcar (409).
    */
   r.put('/logs/:type/:code', (req, res) => {
     const { type, code } = placeParams(req);
@@ -116,6 +146,7 @@ export function meRoutes(db) {
         throw conflict('Ya marcaste este lugar como visitado; no puede estar en "Quiero ir".');
       }
       if (next.visited) next.wishlist = false;
+      if (type === 'region' && prev?.visited && !next.visited) assertRegionCanBeUnvisited(db, req.user.id, code);
 
       if (!next.visited && !next.wishlist) {
         if (prev) db.prepare('DELETE FROM logs WHERE id = ?').run(prev.id);
@@ -132,13 +163,15 @@ export function meRoutes(db) {
           review_at = excluded.review_at, updated_at = excluded.updated_at
       `).run(req.user.id, type, code, +next.visited, +next.wishlist, next.rating, next.review, next.visitedOn, reviewAt, now, now);
       clearOrphanVotes(db, req.user.id);
-      return db.prepare('SELECT * FROM logs WHERE user_id = ? AND place_type = ? AND place_code = ?').get(req.user.id, type, code);
+      const regionLogs = type === 'comuna' && next.visited ? syncRegions(db, req.user.id) : [];
+      return { row: db.prepare('SELECT * FROM logs WHERE user_id = ? AND place_type = ? AND place_code = ?').get(req.user.id, type, code), regionLogs };
     });
-    res.json({ log: result ? ser.log(result) : null });
+    res.json({ log: result ? ser.log(result.row) : null, regionLogs: result ? result.regionLogs.map(ser.log) : [] });
   });
 
   r.delete('/logs/:type/:code', (req, res) => {
     const { type, code } = placeParams(req);
+    if (type === 'region') assertRegionCanBeUnvisited(db, req.user.id, code);
     db.prepare('DELETE FROM logs WHERE user_id = ? AND place_type = ? AND place_code = ?').run(req.user.id, type, code);
     res.status(204).end();
   });
@@ -170,6 +203,8 @@ export function meRoutes(db) {
       }
       purge.run(req.user.id);
       clearOrphanVotes(db, req.user.id);
+      // Las regiones con comunas visitadas quedan (o vuelven a quedar) visitadas.
+      syncRegions(db, req.user.id);
     });
     res.json({ logs: loadLogs(db, req.user.id) });
   });

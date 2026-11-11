@@ -2,7 +2,7 @@
 
 Una bitácora de viajes estilo Letterboxd, pero con **las 16 regiones y 346 comunas de Chile** en vez de películas.
 
-- Crea tu cuenta y marca los lugares que has visitado (regiones y comunas **por separado**).
+- Crea tu cuenta y marca las comunas y regiones que has visitado: **al marcar una comuna, su región queda marcada** automáticamente (y no se puede desmarcar mientras tenga comunas visitadas). También puedes marcar una región sin marcar comunas.
 - Ponles nota de **½ a 5 estrellas** (con medias estrellas), escribe reseñas o agrégalos a **"Quiero ir"**.
 - Vota las reseñas de otros con 👍 / 👎: se muestran primero las de más votos netos.
 - Descubre tu **mapa pixel art** de Chile: lo que no has visitado está bajo la niebla y se despeja con cada viaje (modo regiones o comunas). Mar, desierto, valles, bosques, los Andes y nubes sobre los países vecinos; recuadros para Rapa Nui, Juan Fernández y la Antártica, y un zoom del Gran Santiago.

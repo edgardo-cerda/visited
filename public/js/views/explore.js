@@ -10,7 +10,7 @@ export async function exploreView(ctx) {
   mount(ctx.root, html`
     <section class="page-head">
       <h1>Explorar Chile</h1>
-      <p class="muted">Regiones y comunas se registran por separado: puedes marcar una región aunque no hayas recorrido todas sus comunas.</p>
+      <p class="muted">Al marcar una comuna, su región queda marcada como visitada. También puedes marcar una región sin marcar sus comunas.</p>
       <nav class="tabs">
         <a href="/explorar" class="${tab === 'regiones' ? 'active' : ''}">Regiones <small>16</small></a>
         <a href="/explorar?tab=comunas" class="${tab === 'comunas' ? 'active' : ''}">Comunas <small>346</small></a>

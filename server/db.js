@@ -76,6 +76,13 @@ const MIGRATIONS = [
   );
   CREATE INDEX review_votes_user ON review_votes(user_id);
   `,
+  // v3: visitar una comuna marca su región (código de región = código de comuna / 1000).
+  `
+  INSERT INTO logs (user_id, place_type, place_code, visited, wishlist)
+    SELECT DISTINCT user_id, 'region', place_code / 1000, 1, 0 FROM logs
+    WHERE place_type = 'comuna' AND visited = 1
+  ON CONFLICT (user_id, place_type, place_code) DO UPDATE SET visited = 1, wishlist = 0;
+  `,
 ];
 
 export function openDb(file) {

@@ -4,7 +4,7 @@ import { store, me, getMap, getLog, stateIn, placeName, saveLog, myProgress } fr
 import { PixelMap, posterCanvas } from '../pixelmap.js';
 import { landmarksFor, spriteCanvas } from '../landmarks.js';
 import {
-  icon, stars, starInput, fmtRating, mapsFor, poster, reviewCard, openLogEditor, quickToggle, toast, levelUpCheck,
+  icon, stars, starInput, fmtRating, regionsMarkedToast, mapsFor, poster, reviewCard, openLogEditor, quickToggle, toast, levelUpCheck,
   bar, emptyState, confirmDialog,
 } from '../components.js';
 
@@ -132,13 +132,16 @@ export async function placeView(ctx, type, code) {
       <div class="action-rating"><span class="section-label">${log.rating ? 'Tu nota' : 'Evalúa'}</span><span id="my-stars"></span></div>
       ${log.visitedOn ? html`<p class="muted center">Visitado el ${fmtDate(log.visitedOn)}</p>` : ''}
       <button type="button" class="btn btn-block" data-act="editor">${icon('pen')} ${log.review ? 'Editar reseña' : 'Registrar o reseñar…'}</button>
-      ${type === 'region' && !log.visited && myProgress().byRegion.find((r) => r.code === code)?.visitedComunas > 0
-        ? html`<p class="hint">Visitaste comunas de esta región pero aún no marcas la región.</p>` : ''}
+      ${(() => {
+        const n = type === 'region' ? myProgress().byRegion.find((r) => r.code === code)?.visitedComunas || 0 : 0;
+        return n ? html`<p class="hint">Marcada porque visitaste ${n} comuna${n === 1 ? '' : 's'} de esta región.</p>` : '';
+      })()}
     `);
     $('#my-stars', actions).append(starInput(log.rating, async (v) => {
       try {
-        const { before, after } = await saveLog(type, code, { rating: v });
+        const { regionLogs, before, after } = await saveLog(type, code, { rating: v });
         toast(v ? `Nota guardada: ${fmtRating(v)} ★` : 'Nota borrada', 'ok');
+        regionsMarkedToast(regionLogs);
         levelUpCheck(before, after);
       } catch (e) { toast(e.message, 'error'); }
     }));

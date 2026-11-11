@@ -217,12 +217,15 @@ export function saveLog(type, code, patch) {
   const key = logKey(type, code);
   const run = async () => {
     const before = myProgress();
-    const { log } = await api(`/me/logs/${type}/${code}`, { method: 'PUT', body: patch });
+    const { log, regionLogs = [] } = await api(`/me/logs/${type}/${code}`, { method: 'PUT', body: patch });
     if (log) store.logs.set(key, log);
     else store.logs.delete(key);
+    // Visitar una comuna marca su región: el servidor devuelve las regiones que marcó.
+    for (const r of regionLogs) store.logs.set(logKey(r.type, r.code), r);
     const after = myProgress();
     emit('logs', { type, code, log });
-    return { log, before, after };
+    for (const r of regionLogs) emit('logs', { type: r.type, code: r.code, log: r });
+    return { log, regionLogs, before, after };
   };
   const p = (pending.get(key) || Promise.resolve()).catch(() => {}).then(run);
   pending.set(key, p);

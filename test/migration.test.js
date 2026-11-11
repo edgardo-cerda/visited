@@ -29,7 +29,10 @@ test('migra una base v1 (notas enteras y "me gusta") a v2 sin perder datos', () 
   v1.close();
 
   const db = openDb(file);
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 2);
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 3);
+  // v3: la comuna visitada (Isla de Pascua) marca su región (Valparaíso).
+  const region = db.prepare("SELECT * FROM logs WHERE user_id = 1 AND place_type = 'region' AND place_code = 5").get();
+  assert.equal(region?.visited, 1);
   const row = db.prepare('SELECT * FROM logs WHERE id = 7').get();
   assert.equal(row.rating, 4);
   assert.equal(row.review, 'Bonito');

@@ -72,7 +72,7 @@ Los tokens duran 60 días (`TOKEN_TTL_DAYS`). Guárdalo de forma segura en la ap
 }
 ```
 
-`PUT /me/logs/:type/:code` acepta cualquier subconjunto de
+`PUT /me/logs/:type/:code` responde `{ "log": …, "regionLogs": [ … ] }` y acepta cualquier subconjunto de
 `visited` (bool), `wishlist` (bool), `rating` (0.5 a 5 en pasos de 0.5, o `null`),
 `review` (texto ≤ 5000 o `null`), `visitedOn` (`AAAA-MM-DD` o `null`). Reglas:
 
@@ -80,7 +80,8 @@ Los tokens duran 60 días (`TOKEN_TTL_DAYS`). Guárdalo de forma segura en la ap
 - `visited: false` borra nota, reseña y fecha (y los votos que tenía la reseña).
 - `wishlist` ("Quiero ir") sólo aplica a lugares no visitados (`409` si ya está visitado). Visitar un lugar lo saca de "Quiero ir".
 - Si nada queda marcado, el registro se elimina y la respuesta es `{ "log": null }`.
-- **Regiones y comunas son independientes:** marcar una comuna no marca su región.
+- **Visitar una comuna marca su región.** La respuesta trae `regionLogs` con las regiones que se marcaron en ese momento (lista vacía si ya estaban). También vale para `POST /me/logs/batch`.
+- Una región con comunas visitadas **no se puede desmarcar** (`409`); primero hay que desmarcar sus comunas. Desmarcar una comuna no desmarca la región. Una región sí se puede marcar sin marcar comunas.
 
 ## Lugares y comunidad (públicos)
 

@@ -25,12 +25,36 @@ function load() {
       db.votes ||= [];
       // Datos de la versión anterior: sin "me gusta" en lugares.
       for (const l of db.logs) delete l.liked;
+      // Visitar una comuna marca su región.
+      for (const u of db.users) syncRegions(db, u.id);
       return db;
     }
   } catch { /* datos corruptos: se reinicia */ }
   return { users: [], sessions: {}, logs: [], votes: [], nextId: 1 };
 }
 const save = (db) => localStorage.setItem(KEY, JSON.stringify(db));
+
+/**
+ * Regla: si visitaste alguna comuna de una región, la región queda visitada
+ * (código de región = código de comuna / 1000). Devuelve las regiones marcadas.
+ */
+function syncRegions(db, userId) {
+  const regions = new Set(db.logs.filter((l) => l.userId === userId && l.type === 'comuna' && l.visited).map((l) => Math.floor(l.code / 1000)));
+  const changed = [];
+  for (const code of regions) {
+    let r = db.logs.find((l) => l.userId === userId && l.type === 'region' && l.code === code);
+    if (r?.visited) continue;
+    const t = new Date().toISOString();
+    if (!r) db.logs.push((r = { id: db.nextId++, userId, type: 'region', code, rating: null, review: null, visitedOn: null, reviewAt: null, createdAt: t }));
+    Object.assign(r, { visited: true, wishlist: false, updatedAt: t });
+    changed.push(r);
+  }
+  return changed;
+}
+
+/** Cuántas comunas visitadas tiene el usuario en una región. */
+const comunasVisitedIn = (db, userId, region) =>
+  db.logs.filter((l) => l.userId === userId && l.type === 'comuna' && l.visited && Math.floor(l.code / 1000) === region).length;
 
 class Fail extends Error {
   constructor(status, code, message, field) {
@@ -262,6 +286,7 @@ async function handle(method, path, body, token) {
         } else throw bad('"visited" debe ser true o false.');
       }
       db.logs = db.logs.filter((l) => l.userId !== u.id || l.visited || l.wishlist);
+      syncRegions(db, u.id);
       pruneVotes(db);
       save(db);
       return { data: { logs: userLogs(db, u.id) } };
@@ -272,7 +297,12 @@ async function handle(method, path, body, token) {
       const idx = db.logs.findIndex((x) => x.userId === u.id && x.type === type && x.code === p.code);
       const prev = idx >= 0 ? db.logs[idx] : null;
       if (method === 'GET') return { data: { log: prev ? pubLog(prev) : null } };
+      const blockUnvisit = () => {
+        const n = type === 'region' ? comunasVisitedIn(db, u.id, p.code) : 0;
+        if (n > 0) throw conflict(`Visitaste ${n} comuna${n === 1 ? '' : 's'} de esta región, así que la región queda marcada como visitada. Desmárcala${n === 1 ? '' : 's'} primero.`);
+      };
       if (method === 'DELETE') {
+        blockUnvisit();
         if (prev) db.logs.splice(idx, 1);
         pruneVotes(db);
         save(db);
@@ -294,20 +324,22 @@ async function handle(method, path, body, token) {
         else if (next.rating || next.review || next.visitedOn) next.visited = true;
         if (next.visited && input.wishlist === true) throw conflict('Ya marcaste este lugar como visitado; no puede estar en "Quiero ir".');
         if (next.visited) next.wishlist = false;
+        if (prev?.visited && !next.visited) blockUnvisit();
         if (!next.visited && !next.wishlist) {
           if (prev) db.logs.splice(idx, 1);
           pruneVotes(db);
           save(db);
-          return { data: { log: null } };
+          return { data: { log: null, regionLogs: [] } };
         }
         const t = now();
         const reviewAt = next.review ? (prev && prev.review === next.review ? prev.reviewAt : t) : null;
         const log = prev || { id: db.nextId++, userId: u.id, type, code: p.code, createdAt: t };
         Object.assign(log, next, { reviewAt, updatedAt: t });
         if (!prev) db.logs.push(log);
+        const regionLogs = type === 'comuna' && next.visited ? syncRegions(db, u.id) : [];
         pruneVotes(db);
         save(db);
-        return { data: { log: pubLog(log) } };
+        return { data: { log: pubLog(log), regionLogs: regionLogs.map(pubLog) } };
       }
     }
   }
