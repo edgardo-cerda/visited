@@ -77,7 +77,8 @@ const ANTARTICA = 12202;
 const V_EMPTY = 0; // fondo
 const V_FRAME = 1; // marco de recuadros
 const V_OTHER = 2; // tierra fuera de Chile (países vecinos, Antártica fuera del sector chileno)
-const V_FIRST = 3; // v >= 3 -> codes[v - 3]
+const V_VOID = 3; // "nada" (mapa nacional: más allá de la cordillera y lejos de la costa)
+const V_FIRST = 4; // v >= 4 -> codes[v - 4]
 
 // ---------------------------------------------------------------------------
 // Descarga con caché
@@ -157,7 +158,7 @@ class Grid {
     if (x < 0 || y < 0 || x + w > this.w || y + h > this.h) return false;
     for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) {
       const v = this.data[j * this.w + i];
-      if (v !== V_EMPTY && v !== V_OTHER) return false;
+      if (v !== V_EMPTY && v !== V_OTHER && v !== V_VOID) return false;
     }
     return true;
   }
@@ -297,7 +298,7 @@ function noise2(x, y, s) {
  * Deja los países vecinos sólo como una franja de ancho irregular junto a
  * Chile (cordillera + nubes), en vez de rectángulos cortados por el borde.
  */
-function trimNeighbours(grid, min = R(9), extra = R(8)) {
+function trimNeighbours(grid, min = R(9), extra = R(8), fill = V_EMPTY) {
   const { w, h, data } = grid;
   const dist = new Uint8Array(w * h).fill(255);
   let frontier = [];
@@ -319,7 +320,58 @@ function trimNeighbours(grid, min = R(9), extra = R(8)) {
     if (data[j] !== V_OTHER) continue;
     const x = j % w, y = Math.floor(j / w);
     const limit = min + extra * (0.6 * noise2(x, y, 9) + 0.4 * noise2(x + 50, y, 3));
-    if (dist[j] > limit) data[j] = V_EMPTY;
+    if (dist[j] > limit) data[j] = fill;
+  }
+  return grid;
+}
+
+/**
+ * Mapa nacional: el mar queda sólo al oeste, en una franja junto a la costa;
+ * más allá de la cordillera (este) y lejos de la costa no hay "nada".
+ * `ranges`: [x0, x1, y0, y1) de cada tramo.
+ */
+function carveVoid(grid, ranges, seaMin = R(10), seaExtra = R(9)) {
+  const { w, h, data } = grid;
+  const isLand = (v) => v === V_OTHER || v >= V_FIRST;
+  // 1) Este: a la derecha de la última tierra (Chile o vecino) de cada fila del tramo.
+  for (const [x0, x1] of ranges) {
+    const east = new Int32Array(h).fill(-1);
+    for (let y = 0; y < h; y++) for (let x = x1 - 1; x >= x0; x--) if (isLand(data[y * w + x])) { east[y] = x; break; }
+    const known = [];
+    for (let y = 0; y < h; y++) if (east[y] >= 0) known.push(y);
+    if (!known.length) continue;
+    for (let y = 0; y < h; y++) {
+      let e = east[y];
+      if (e < 0) e = east[known.reduce((a, k) => (Math.abs(k - y) < Math.abs(a - y) ? k : a), known[0])];
+      for (let x = e + 1; x < x1; x++) if (data[y * w + x] === V_EMPTY) data[y * w + x] = V_VOID;
+    }
+  }
+  // 2) Oeste: mar sólo en una franja de ancho irregular junto a la tierra.
+  const max = seaMin + seaExtra;
+  const dist = new Uint8Array(w * h).fill(255);
+  let frontier = [];
+  for (let j = 0; j < w * h; j++) if (isLand(data[j])) { dist[j] = 0; frontier.push(j); }
+  for (let d = 1; d <= max && frontier.length; d++) {
+    const next = [];
+    for (const j of frontier) {
+      const x = j % w;
+      for (const n of [x > 0 ? j - 1 : -1, x < w - 1 ? j + 1 : -1, j - w, j + w]) {
+        if (n < 0 || n >= w * h || dist[n] !== 255 || data[n] !== V_EMPTY) continue;
+        dist[n] = d;
+        next.push(n);
+      }
+    }
+    frontier = next;
+  }
+  for (let j = 0; j < w * h; j++) {
+    if (data[j] !== V_EMPTY) continue;
+    const x = j % w, y = Math.floor(j / w);
+    if (dist[j] > seaMin + seaExtra * (0.6 * noise2(x + 99, y, 10) + 0.4 * noise2(x, y + 40, 4))) { data[j] = V_VOID; continue; }
+    // Cerca del borde del tramo el mar también se corta de forma irregular (no en línea recta).
+    const r = ranges.find(([x0, x1]) => x >= x0 && x < x1);
+    if (!r) continue;
+    const edge = Math.min(x - r[0], r[1] - 1 - x, y - r[2], r[3] - 1 - y);
+    if (edge < R(2) + R(5) * noise2(x + 7, y + 3, 5)) data[j] = V_VOID;
   }
   return grid;
 }
@@ -522,20 +574,26 @@ async function main() {
         const [X, Y] = proj(lon, lat);
         b.x0 = Math.min(b.x0, X); b.x1 = Math.max(b.x1, X); b.y0 = Math.min(b.y0, Y); b.y1 = Math.max(b.y1, Y);
       }
-      const bounds = { x0: b.x0 - R(2) * cell, x1: b.x1 + R(9) * cell, y0: b.y0 - cell, y1: b.y1 + cell };
-      return { ...s, grid: trimNeighbours(fillBorderGaps(rasterize({ items: [...neighbours, ...own], project: proj, cell, bounds, margin: 0 }))) };
+      // Al norte de Arica se muestra el sur de Perú.
+      // Espacio para el mar al oeste, arriba y abajo (se recorta después con borde irregular).
+      const north = s.label === 'NORTE' ? R(14) : R(10);
+      const bounds = { x0: b.x0 - R(14) * cell, x1: b.x1 + R(9) * cell, y0: b.y0 - north * cell, y1: b.y1 + R(10) * cell };
+      return { ...s, grid: trimNeighbours(fillBorderGaps(rasterize({ items: [...neighbours, ...own], project: proj, cell, bounds, margin: 0 })), R(9), R(8), V_VOID) };
     });
-    const gap = R(3), top = R(7);
+    const gap = 0, top = R(4);
     const W = strips.reduce((s, x) => s + x.grid.w, 0) + gap * (strips.length - 1);
     const H = Math.max(...strips.map((s) => s.grid.h)) + top;
     let grid = new Grid(W, H);
     const labels = [];
     let ox = 0;
+    const ranges = [];
     for (const s of strips) {
       grid.blit(s.grid, ox, top);
       labels.push({ text: s.label, x: ox + s.grid.w / 2, y: top * 0.4 });
+      ranges.push([ox, ox + s.grid.w, top, top + s.grid.h]);
       ox += s.grid.w + gap;
     }
+    carveVoid(grid, ranges);
     const res = placeInsets(grid, [insets.rapanui(), insets.jf(), insets.antartica()], ['right'], 'right');
     maps.chile = { title: 'Chile', w: res.grid.w, h: res.grid.h, labels, insets: res.placed, rle: rle(res.grid.data) };
     console.log(`  chile: ${res.grid.w}×${res.grid.h}`);
@@ -601,7 +659,7 @@ async function main() {
     comunas,
   };
   fs.writeFileSync(path.join(OUT, 'catalog.json'), JSON.stringify(catalog));
-  const mapsOut = { version: 1, special: { empty: V_EMPTY, frame: V_FRAME, other: V_OTHER, first: V_FIRST }, codes, maps };
+  const mapsOut = { version: 1, special: { empty: V_EMPTY, frame: V_FRAME, other: V_OTHER, void: V_VOID, first: V_FIRST }, codes, maps };
   fs.writeFileSync(path.join(OUT, 'maps.json'), JSON.stringify(mapsOut));
   const kb = (f) => (fs.statSync(path.join(OUT, f)).size / 1024).toFixed(0);
   console.log(`Listo: catalog.json (${kb('catalog.json')} KB), maps.json (${kb('maps.json')} KB)`);

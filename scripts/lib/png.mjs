@@ -46,3 +46,42 @@ export function pngSize(buf) {
   if (buf.readUInt32BE(0) !== 0x89504e47 || buf.toString('ascii', 12, 16) !== 'IHDR') throw new Error('No es un PNG válido');
   return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
 }
+
+/**
+ * Decodifica un PNG de 8 bits RGBA o RGB, sin entrelazado (lo que guardan los
+ * editores de pixel art). Devuelve { w, h, data: Uint8Array RGBA }.
+ */
+export function decodePNG(buf) {
+  const { w, h } = pngSize(buf);
+  const depth = buf[24], type = buf[25], interlace = buf[28];
+  if (depth !== 8 || (type !== 6 && type !== 2) || interlace !== 0) {
+    throw new Error('Sólo se admiten PNG RGB/RGBA de 8 bits sin entrelazado');
+  }
+  const idat = [];
+  for (let p = 8; p < buf.length;) {
+    const len = buf.readUInt32BE(p), kind = buf.toString('ascii', p + 4, p + 8);
+    if (kind === 'IDAT') idat.push(buf.subarray(p + 8, p + 8 + len));
+    p += 12 + len;
+  }
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const bpp = type === 6 ? 4 : 3, stride = w * bpp;
+  const cur = new Uint8Array(stride), prev = new Uint8Array(stride);
+  const out = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)], row = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    for (let i = 0; i < stride; i++) {
+      const a = i >= bpp ? cur[i - bpp] : 0, b = prev[i], c = i >= bpp ? prev[i - bpp] : 0;
+      let v = row[i];
+      if (f === 1) v += a;
+      else if (f === 2) v += b;
+      else if (f === 3) v += (a + b) >> 1;
+      else if (f === 4) { const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c); v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c; }
+      cur[i] = v & 255;
+    }
+    for (let x = 0; x < w; x++) {
+      out.set([cur[x * bpp], cur[x * bpp + 1], cur[x * bpp + 2], bpp === 4 ? cur[x * bpp + 3] : 255], (y * w + x) * 4);
+    }
+    prev.set(cur);
+  }
+  return { w, h, data: out };
+}

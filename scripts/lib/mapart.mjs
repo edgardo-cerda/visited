@@ -30,6 +30,10 @@ export const COLORS = {
   snow: C('#ffffff'),
   snowShade: C('#cdd2ea'),
   rock: C('#7b5b4b'),
+  sandLight: C('#eedcb4'),
+  sand: C('#ddc79a'),
+  sandDark: C('#c4aa78'),
+  seaEdge: C('#1477b5'),
   frame: C('#5a4030'),
   fog: C('#c9c9cc'),
   hover: C('#fff3a6'),
@@ -146,25 +150,46 @@ export function staticLayer(map) {
   const isChile = (j) => comuna[j] !== 0;
   const isEmpty = (j) => data[j] === special.empty;
   const isOther = (j) => data[j] === special.other;
+  const isVoid = (j) => special.void !== undefined && data[j] === special.void;
+  // Mapa con "nada" (mapa nacional): países vecinos como montañas (o desierto en la costa).
+  const mountainStyle = special.void !== undefined && data.some((v) => v === special.void);
   const seaDist = distanceField(w, h, (j) => isChile(j) || isOther(j), isEmpty, 9);
   const slopeDist = distanceField(w, h, isChile, (j) => isOther(j) && !insetMask[j], 7);
+  const coastDist = distanceField(w, h, (j) => isEmpty(j) && !insetMask[j], (j) => isOther(j) && !insetMask[j], 4);
+  const isMountain = (j) => mountainStyle && isOther(j) && !insetMask[j] && coastDist[j] > 3;
+  const nextToVoid = (j, x) => [x > 0 ? j - 1 : -1, x < w - 1 ? j + 1 : -1, j - w, j + w].some((n) => n >= 0 && n < w * h && isVoid(n));
   const px = new Uint8ClampedArray(w * h * 4);
   const put = (j, c) => { px[j * 4] = c[0]; px[j * 4 + 1] = c[1]; px[j * 4 + 2] = c[2]; px[j * 4 + 3] = 255; };
 
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const j = y * w + x;
     const v = data[j];
-    if (isChile(j)) continue;
+    if (isChile(j) || isVoid(j)) continue; // "nada": queda transparente
     if (v === special.frame) { put(j, COLORS.frame); continue; }
     if (v === special.empty) {
       const d = seaDist[j];
       let c;
+      if (mountainStyle && nextToVoid(j, x)) { put(j, COLORS.seaEdge); continue; }
       if (d === 1) c = COLORS.foam;
       else if (d === 2) c = (x + y) % 2 ? COLORS.foam : COLORS.shallow;
       else if (d <= 4) c = COLORS.shallow;
       else if (d === 5) c = (x + y) % 2 ? COLORS.shallow : COLORS.shallow2;
       else if (d <= 7) c = COLORS.shallow2;
       else c = deepWater(x, y);
+      put(j, c);
+      continue;
+    }
+    // País vecino (estilo montañas): desierto en la costa (Perú), cordillera hacia el este.
+    if (mountainStyle && !insetMask[j]) {
+      let c;
+      if (coastDist[j] <= 3) {
+        const n = noise(x, y, 6);
+        c = n > 0.62 ? COLORS.sandLight : n < 0.35 ? COLORS.sandDark : COLORS.sand;
+      } else {
+        const n = noise(x + 0.3 * y, y, 7) * 0.6 + noise(x, y, 3) * 0.4;
+        c = slopeDist[j] <= 2 ? COLORS.slopeDark : n > 0.6 ? COLORS.slopeLight : n < 0.36 ? COLORS.slopeDark : COLORS.slope;
+      }
+      if (nextToVoid(j, x)) c = COLORS.rock;
       put(j, c);
       continue;
     }
@@ -191,13 +216,37 @@ export function staticLayer(map) {
   // Destellos en el mar abierto.
   for (let y = 0; y < h; y++) for (let x = 0; x < w - 2; x++) {
     const j = y * w + x;
-    if (seaDist[j] >= 9 && seaDist[j + 1] >= 9 && seaDist[j + 2] >= 9 && hash(x, y) < 0.008) {
+    const open = (k) => isEmpty(k) && seaDist[k] >= 9 && !(mountainStyle && nextToVoid(k, k % w));
+    if (open(j) && open(j + 1) && open(j + 2) && hash(x, y) < 0.008) {
       put(j, COLORS.sparkle); put(j + 1, COLORS.sparkle); put(j + 2, COLORS.sparkle);
     }
   }
 
   // Cumbres nevadas sobre la ladera, a lo largo del borde oriental.
   const PH = PEAK.length, PW = PEAK[0].length;
+  const drawPeak = (ox, oy) => {
+    for (let r = 0; r < PH; r++) for (let c = 0; c < PW; c++) {
+      const ch = PEAK[r][c];
+      if (ch === '.') continue;
+      const tj = (oy + r) * w + ox + c;
+      put(tj, ch === 'S' ? COLORS.snow : ch === 's' ? COLORS.snowShade : ch === 'r' ? COLORS.slopeDark : COLORS.rock);
+    }
+  };
+  if (mountainStyle) {
+    // Cordillera: cumbres en tresbolillo sobre toda la zona de montañas.
+    for (let gy = 0, y = 0; y < h; gy++, y += 5) for (let x = (gy % 2) * 3; x < w; x += 6) {
+      const ox = x + Math.floor(hash(x, y) * 3) - 1, oy = y + Math.floor(hash(y + 7, x) * 3) - 1;
+      let fits = true;
+      for (let r = 0; r < PH && fits; r++) for (let c = 0; c < PW && fits; c++) {
+        if (PEAK[r][c] === '.') continue;
+        const tx = ox + c, ty = oy + r;
+        fits = tx >= 0 && ty >= 0 && tx < w && ty < h && isMountain(ty * w + tx);
+      }
+      if (fits) drawPeak(ox, oy);
+    }
+    map.staticLayer = px;
+    return px;
+  }
   for (let y = PH; y < h; y++) {
     if ((y + Math.floor(hash(1, y) * 4)) % 9 !== 0) continue;
     for (let x = 1; x < w; x++) {

@@ -42,7 +42,9 @@ Cada mapa está dibujado **como se ve cuando todo está visitado**: mar, costa, 
 - trama lo que está en "Quiero ir",
 - dibuja los bordes entre comunas o regiones y resalta el lugar bajo el mouse.
 
-Así que basta con dibujar una sola versión. Las imágenes de cada comuna y región (las "islas") se recortan de estos mismos mapas: si cambias los colores de una comuna en `r5.png`, cambia también su imagen.
+Así que basta con dibujar una sola versión.
+
+En `chile.png` los pixeles **transparentes** son "nada": la web muestra ahí el fondo de la página. Por eso el mar aparece sólo al oeste, en una franja junto a la costa, y al este de la cordillera no hay nada. Al norte de Arica se ve parte del Perú. Las imágenes de cada comuna y región (las "islas") se recortan de estos mismos mapas: si cambias los colores de una comuna en `r5.png`, cambia también su imagen.
 
 **Importante:** qué pixel pertenece a qué comuna no está en el PNG sino en `public/data/maps.json`. Puedes cambiar colores, texturas y detalles libremente, pero si pintas tierra donde la grilla dice "mar" (o al revés), ese pixel no será clickeable ni cambiará de color al visitar. El tamaño del PNG debe ser exactamente el de su grilla (`npm test` lo verifica).
 
