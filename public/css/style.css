@@ -185,8 +185,8 @@ textarea { resize: vertical; width: 100%; line-height: 1.4; }
 .legend { display: flex; align-items: center; gap: 6px 16px; flex-wrap: wrap; color: var(--muted); margin: 12px 0 0; font-size: 15px; }
 .map-toolbar .legend { margin: 0; }
 .legend i { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--brown); margin-right: -10px; vertical-align: -2px; image-rendering: pixelated; }
-.lg-visited { background: linear-gradient(90deg, #f2cc70 50%, #5bbb73 50%); }
-.lg-wish { background: repeating-conic-gradient(#8ece6c 0 25%, #c4c4c7 0 50%) 0 0 / 4px 4px; }
+.lg-visited { background: #2f9b74; }
+.lg-wish { background: repeating-conic-gradient(#2f9b74 0 25%, #c4c4c7 0 50%) 0 0 / 4px 4px; }
 .lg-none { background: #c4c4c7; }
 .region-maps { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; margin-bottom: 28px; }
 .region-maps .section-label { margin: 0; padding: 6px 10px; background: var(--card); border-bottom: 3px solid var(--brown); }

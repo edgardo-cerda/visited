@@ -21,10 +21,8 @@ fs.rmSync(OUT, { recursive: true, force: true });
 fs.cpSync(SRC, OUT, { recursive: true });
 
 let html = fs.readFileSync(path.join(SRC, 'index.html'), 'utf8');
-for (const asset of ['/css/style.css', '/img/favicon.svg', '/js/app.js']) {
-  if (!html.includes(`"${asset}"`)) throw new Error(`No se encontró ${asset} en index.html`);
-  html = html.replace(`"${asset}"`, `"${base}${asset}"`);
-}
+// Rutas absolutas de la página (/css, /js, /img…) -> bajo el prefijo del sitio.
+html = html.replace(/(href|src)="\/(?!\/)/g, (_, attr) => `${attr}="${base}/`);
 const config = `<script>window.VISITED_CONFIG = ${JSON.stringify({ base, demo: true })};</script>\n  `;
 html = html.replace('<script type="module"', `${config}<script type="module"`);
 html = html.replace('<title>Visited · Chile</title>', '<title>Visited · Chile (versión de prueba)</title>');

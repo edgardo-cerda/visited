@@ -36,7 +36,7 @@ Los pixeles con transparencia menor a 50% no se dibujan. En la imagen grande de 
 | `public/img/maps/santiago.png` | Zoom del Gran Santiago. |
 | `public/img/poster-ocean.png` | Fondo de mar de las imágenes de cada lugar. |
 
-Cada mapa está dibujado **como se ve cuando todo está visitado**: mar, costa, terreno, cordillera y nubes. La web, al mostrarlo:
+Cada mapa está dibujado **como se ve cuando todo está visitado** (todas las comunas en el mismo verde, `#2f9b74`): mar, costa, terreno, cordillera y nubes. La web, al mostrarlo:
 
 - pasa a gris (con niebla) lo que no has visitado,
 - trama lo que está en "Quiero ir",
@@ -47,6 +47,16 @@ Así que basta con dibujar una sola versión. Las imágenes de cada comuna y reg
 En `chile.png` los pixeles **transparentes** son "nada": la web muestra ahí el fondo de la página. Por eso el mar aparece sólo al oeste, en una franja junto a la costa, y al este de la cordillera no hay nada. Al norte de Arica se ve parte del Perú.
 
 **Importante:** qué pixel pertenece a qué comuna no está en el PNG sino en `public/data/maps.json`. Puedes cambiar colores, texturas y detalles libremente, pero si pintas tierra donde la grilla dice "mar" (o al revés), ese pixel no será clickeable ni cambiará de color al visitar. El tamaño del PNG debe ser exactamente el de su grilla (`npm test` lo verifica).
+
+## Ícono de la pestaña y logo
+
+| Archivo | Qué es |
+|---|---|
+| `public/img/favicon.svg` | Ícono de la pestaña (montaña con la bandera de Chile, 32×32). |
+| `public/img/favicon-32.png` | El mismo ícono en PNG, para navegadores sin soporte de SVG. |
+| `public/img/apple-touch-icon.png` | El mismo ícono a 192×192, para la pantalla de inicio del celular. |
+
+El logo de la barra superior es el mismo dibujo, incrustado en `public/index.html`. Si cambias el ícono, sube el número de `?v=2` en los `<link rel="icon">` de `index.html` para que los navegadores no muestren el antiguo guardado en caché.
 
 ## Regenerar desde cero
 

@@ -43,12 +43,10 @@ export const COLORS = {
 };
 
 /** Color de terreno de cada región (norte → sur). */
-const BIOME = {
-  15: '#f4d27a', 1: '#f2cc70', 2: '#efc468', 3: '#e3c76c', 4: '#d2cd6d',
-  5: '#bdd46c', 13: '#add46b', 6: '#9fd26b', 7: '#8ece6c', 16: '#7cc96f',
-  8: '#6bc372', 9: '#5bbb73', 14: '#49b276', 10: '#3ca877', 11: '#2f9b74', 12: '#55a184',
-};
-const COMUNA_BIOME = { 5201: '#7fcf6a', 5104: '#5cbf6c', 12202: '#eef4ff' };
+/** Color de las comunas visitadas: el mismo verde para todas (el que tenía Aysén). */
+export const VISITED_GREEN = '#2f9b74';
+const BIOME = {};
+const COMUNA_BIOME = {};
 
 const tones = (base) => ({
   light: mix(base, WHITE, 0.35),
@@ -78,7 +76,7 @@ export function terrain(comuna, region) {
   const key = COMUNA_BIOME[comuna] ? comuna : -region;
   let t = toneCache.get(key);
   if (!t) {
-    const full = tones(C(COMUNA_BIOME[comuna] || BIOME[region] || '#8fce6c'));
+    const full = tones(C(COMUNA_BIOME[comuna] || BIOME[region] || VISITED_GREEN));
     t = { full, fog: fogged(full), dimVisited: muted(full) };
     toneCache.set(key, t);
   }
